@@ -21,6 +21,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M4-T01  | M4        | Safe AST Calculator Tool | `feat/safe-calculator-tool` | #14 | 2 | Done | Strict AST arithmetic parser with zero eval/exec and DoS guards |
 | M4-T02  | M4        | Sandboxed File Reader Tool | `feat/sandboxed-file-reader-tool` | #15 | 2 | Done | FILE_TOOL_BASE_DIR sandboxing, path traversal & symlink defense |
 | M4-T03  | M4        | SSRF-Protected HTTP Fetch Tool | `feat/ssrf-http-fetch-tool` | #16 | 2 | Done | DNS & IP SSRF validation, private/metadata blocking, safe redirect |
+| M4-T04  | M4        | Read-Only SQL Tool | `feat/readonly-sql-tool` | #17 | 2 | Done | Strict SELECT AST validation, DDL/DML rejection, Markdown formatting |
 
 ---
 
@@ -125,6 +126,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #16
 - **Commits**: 2
 - **Notes**: Implemented `http_fetch` tool and `validate_url_ssrf` in `agentkit/tools/builtin/http_fetch.py` blocking loopback, RFC1918 private subnets, cloud metadata (169.254.169.254), non-HTTP/HTTPS schemes, with per-hop redirect re-validation. Unit tests in `tests/unit/test_tool_http_fetch.py`.
+
+### M4-T04: Read-Only SQL Tool
+- **Status**: Done
+- **PR**: #17
+- **Commits**: 2
+- **Notes**: Implemented `sql_readonly` tool, `validate_sql_query`, and `execute_sql_query` in `agentkit/tools/builtin/sql_readonly.py` restricting execution strictly to single SELECT or WITH statements, blocking comments and DDL/DML, capping row count, and formatting results as Markdown tables. Unit tests in `tests/unit/test_tool_sql_readonly.py`.
+
 
 
 
