@@ -1,12 +1,13 @@
 import asyncio
 import contextlib
+import json
 import time
 import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentkit.core.errors import MaxStepsExceeded, RunTimeoutError
+from agentkit.core.errors import DuplicateToolCallLoopError, MaxStepsExceeded, RunTimeoutError
 from agentkit.core.types import RunStatus
 from agentkit.llm.base import LLMClient, Message
 from agentkit.tools.registry import ToolRegistry
@@ -39,6 +40,11 @@ class AgentConfig(BaseModel):
         default=2000,
         gt=0,
         description="Output truncation limit.",
+    )
+    max_consecutive_duplicate_tool_calls: int = Field(
+        default=3,
+        gt=0,
+        description="Halt run if identical tool calls are repeated consecutively.",
     )
     system_prompt: str = Field(
         default=DEFAULT_SYSTEM_PROMPT,
@@ -98,6 +104,8 @@ class Agent:
         total_input_tokens = 0
         total_output_tokens = 0
         steps_count = 0
+        last_tool_signature: tuple[str, str] | None = None
+        consecutive_duplicate_count = 0
 
         try:
             async with asyncio.timeout(self.config.run_timeout_s):
@@ -118,6 +126,38 @@ class Agent:
 
                         # Execute each requested tool call
                         for call in response.tool_calls:
+                            args_json = json.dumps(call.arguments, sort_keys=True, default=str)
+                            sig = (call.name, args_json)
+                            if sig == last_tool_signature:
+                                consecutive_duplicate_count += 1
+                            else:
+                                last_tool_signature = sig
+                                consecutive_duplicate_count = 1
+
+                            if (
+                                consecutive_duplicate_count
+                                >= self.config.max_consecutive_duplicate_tool_calls
+                            ):
+                                duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
+                                if raise_on_failure:
+                                    raise DuplicateToolCallLoopError(
+                                        call.name, consecutive_duplicate_count
+                                    )
+                                return RunResult(
+                                    run_id=run_id,
+                                    session_id=session_id,
+                                    goal=goal,
+                                    status=RunStatus.FAILED,
+                                    failure_reason=(
+                                        f"Detected duplicate tool call loop: '{call.name}' called "
+                                        f"{consecutive_duplicate_count} consecutive times with identical arguments: {call.arguments}"
+                                    ),
+                                    steps_count=steps_count,
+                                    total_input_tokens=total_input_tokens,
+                                    total_output_tokens=total_output_tokens,
+                                    duration_ms=duration_ms,
+                                )
+
                             result = await self.registry.execute(
                                 call,
                                 timeout_s=self.config.tool_timeout_s,
