@@ -28,6 +28,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M5-T03  | M5        | PostgreSQL Trace Sink | `feat/postgres-trace-sink` | #21 | 2 | Done | PostgresTraceSink, Run & Step SQLAlchemy models, async SQLite test suite |
 | M6-T01  | M6        | Abstract MemoryStore Interface | `feat/memory-store-base` | #22 | 2 | Done | MemoryStore ABC, immutable RunRecord model, InMemoryMemoryStore |
 | M6-T02  | M6        | Async Redis Session Store | `feat/redis-memory-store` | #23 | 2 | Done | RedisMemoryStore, session key TTL, sliding window truncation |
+| M6-T03  | M6        | Database Models & Alembic Migrations | `feat/alembic-migrations` | #24 | 2 | Done | alembic.ini, env.py, 001_initial migration, upgrade/downgrade test |
 
 ---
 
@@ -174,6 +175,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #23
 - **Commits**: 2
 - **Notes**: Implemented `RedisMemoryStore` in `agentkit/memory/redis_store.py` providing session message serialization, configurable TTL (`SESSION_TTL_S`), and sliding-window history truncation preserving the initial system prompt. Unit tests with `fakeredis` in `tests/unit/test_redis_store.py`.
+
+### M6-T03: Database Models & Alembic Migrations
+- **Status**: Done
+- **PR**: #24
+- **Commits**: 2
+- **Notes**: Configured Alembic with `alembic.ini`, `migrations/env.py` (with support for asyncpg and sync drivers), and initial schema revision `001_initial_runs_and_steps.py` establishing `runs` and `steps` tables, foreign keys, and indexes. Integration test in `tests/integration/test_migrations.py`.
+
 
 
 
