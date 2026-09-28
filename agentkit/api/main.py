@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from agentkit.config import Settings, get_settings
 from agentkit.core.errors import (
     AgentKitError,
+    AuthenticationError,
     LLMProviderError,
     LLMRateLimitError,
     RunTimeoutError,
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 def map_agentkit_error_status(exc: AgentKitError) -> int:
     """Map domain AgentKitError subclasses to appropriate HTTP status codes."""
+    if isinstance(exc, AuthenticationError):
+        return 401
     if isinstance(exc, ToolNotFoundError):
         return 404
     if isinstance(exc, RunTimeoutError):
@@ -71,8 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    if settings is not None:
-        app.state.settings = settings
+    app.state.settings = settings if settings is not None else get_settings()
 
     @app.exception_handler(AgentKitError)
     async def agentkit_error_handler(_request: Request, exc: AgentKitError) -> JSONResponse:

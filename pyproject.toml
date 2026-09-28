@@ -64,6 +64,9 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["agentkit"]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends", "fastapi.Security", "fastapi.params.Security"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
