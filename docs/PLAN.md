@@ -21,7 +21,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Utility inspecting Python function signatures, docstrings, type annotations, and default values to generate OpenAI/Gemini compatible JSON schemas via dynamic Pydantic model creation; unit tests covering primitives, optionals, and missing docstrings.
 - [x] **M1-T03: `@tool` Decorator & Registry Storage (`agentkit/tools/registry.py`)**
   - **Criteria**: `@tool` decorator populating in-memory `ToolRegistry`; registry schema export (`schemas()`); lookup mechanism; unit tests for registration and duplicate handling.
-- [ ] **M1-T04: Safe Tool Execution Engine (`agentkit/tools/executor.py`)**
+- [x] **M1-T04: Safe Tool Execution Engine (`agentkit/tools/executor.py`)**
   - **Criteria**: Synchronous tools executed in threadpool (`asyncio.to_thread`); async tools awaited; per-tool timeout enforcement; output character truncation (`TOOL_OUTPUT_MAX_CHARS`); all exceptions caught and wrapped into `ToolResult(ok=False)`.
 
 ---

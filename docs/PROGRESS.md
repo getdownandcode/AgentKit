@@ -10,6 +10,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M1-T01  | M1        | Tool Models & ToolResult Specification | `feat/tool-models` | #3 | 2 | Done | ToolResult, ToolCall, and ToolSchema models |
 | M1-T02  | M1        | Signature Inspection & JSON Schema Generator | `feat/tool-schema-generator` | #4 | 2 | Done | Dynamic Pydantic schema generator from callables |
 | M1-T03  | M1        | @tool Decorator & Registry Storage | `feat/tool-registry-decorator` | #5 | 2 | Done | ToolRegistry and generic @tool decorator |
+| M1-T04  | M1        | Safe Tool Execution Engine | `feat/tool-executor` | #6 | 2 | Done | Safe execution with threadpool, timeouts, truncation |
 
 ---
 
@@ -48,3 +49,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #5
 - **Commits**: 2
 - **Notes**: Implemented `ToolRegistry` and `@tool` with generic type-preserving overloads in `agentkit/tools/registry.py`. Unit tests in `tests/unit/test_tool_registry.py`.
+
+### M1-T04: Safe Tool Execution Engine
+- **Status**: Done
+- **PR**: #6
+- **Commits**: 2
+- **Notes**: Implemented `execute_tool` in `agentkit/tools/executor.py` and `ToolRegistry.execute()` with sync threadpool dispatch, timeouts, truncation, and error wrapping. Unit tests in `tests/unit/test_tool_executor.py`.
