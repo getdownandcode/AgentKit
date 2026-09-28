@@ -38,6 +38,18 @@ class RunTimeoutError(AgentKitError):
         self.timeout_s = timeout_s
 
 
+class DuplicateToolCallLoopError(AgentKitError):
+    """Raised when an agent run enters a repetitive loop calling identical tools with identical arguments."""
+
+    def __init__(self, tool_name: str, count: int) -> None:
+        super().__init__(
+            f"Detected duplicate tool call loop: '{tool_name}' called {count} consecutive times with identical arguments.",
+            code="DUPLICATE_TOOL_CALL_LOOP",
+        )
+        self.tool_name = tool_name
+        self.count = count
+
+
 class AuthenticationError(AgentKitError):
     """Raised when request API key is missing or invalid."""
 
