@@ -1,7 +1,5 @@
 """Unit tests for Agent configuration and dependency injection."""
 
-import pytest
-
 from agentkit.core.agent import Agent, AgentConfig, RunResult
 from agentkit.core.types import RunStatus
 from agentkit.llm.fake import FakeLLMClient
