@@ -27,6 +27,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M5-T02  | M5        | Contextual Structured JSON Logger | `feat/structured-logging` | #20 | 2 | Done | JSONFormatter, contextvars run_id/step_no propagation, Agent logging |
 | M5-T03  | M5        | PostgreSQL Trace Sink | `feat/postgres-trace-sink` | #21 | 2 | Done | PostgresTraceSink, Run & Step SQLAlchemy models, async SQLite test suite |
 | M6-T01  | M6        | Abstract MemoryStore Interface | `feat/memory-store-base` | #22 | 2 | Done | MemoryStore ABC, immutable RunRecord model, InMemoryMemoryStore |
+| M6-T02  | M6        | Async Redis Session Store | `feat/redis-memory-store` | #23 | 2 | Done | RedisMemoryStore, session key TTL, sliding window truncation |
 
 ---
 
@@ -167,6 +168,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #22
 - **Commits**: 2
 - **Notes**: Implemented abstract `MemoryStore` ABC in `agentkit/memory/base.py` for session conversation messages and run state persistence, along with `RunRecord` immutable model and `InMemoryMemoryStore` for local/test execution. Unit tests in `tests/unit/test_memory_base.py`.
+
+### M6-T02: Async Redis Session Store
+- **Status**: Done
+- **PR**: #23
+- **Commits**: 2
+- **Notes**: Implemented `RedisMemoryStore` in `agentkit/memory/redis_store.py` providing session message serialization, configurable TTL (`SESSION_TTL_S`), and sliding-window history truncation preserving the initial system prompt. Unit tests with `fakeredis` in `tests/unit/test_redis_store.py`.
+
 
 
 
