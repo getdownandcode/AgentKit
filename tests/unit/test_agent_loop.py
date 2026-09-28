@@ -34,7 +34,9 @@ def agent_with_tools() -> tuple[Agent, FakeLLMClient, ToolRegistry]:
 
 
 @pytest.mark.asyncio
-async def test_react_loop_direct_answer(agent_with_tools: tuple[Agent, FakeLLMClient, ToolRegistry]) -> None:
+async def test_react_loop_direct_answer(
+    agent_with_tools: tuple[Agent, FakeLLMClient, ToolRegistry],
+) -> None:
     """Verify single-turn loop where model answers directly without tools."""
     agent, llm, _ = agent_with_tools
     llm.queue_text("Direct answer: The sky is blue.")
@@ -51,7 +53,7 @@ async def test_react_loop_direct_answer(agent_with_tools: tuple[Agent, FakeLLMCl
 
 @pytest.mark.asyncio
 async def test_react_loop_single_tool_call_and_answer(
-    agent_with_tools: tuple[Agent, FakeLLMClient, ToolRegistry]
+    agent_with_tools: tuple[Agent, FakeLLMClient, ToolRegistry],
 ) -> None:
     """Verify two-step ReAct loop: tool call -> tool result -> final answer."""
     agent, llm, _ = agent_with_tools
@@ -96,7 +98,7 @@ async def test_react_loop_single_tool_call_and_answer(
 
 @pytest.mark.asyncio
 async def test_react_loop_multi_tool_calls(
-    agent_with_tools: tuple[Agent, FakeLLMClient, ToolRegistry]
+    agent_with_tools: tuple[Agent, FakeLLMClient, ToolRegistry],
 ) -> None:
     """Verify multi-step ReAct loop across multiple distinct tools."""
     agent, llm, _ = agent_with_tools
