@@ -79,7 +79,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Saves and retrieves conversation message lists keyed by `session_id`; enforces TTL (default 1 hour); sliding-window truncation of oldest non-system messages when exceeding message/token limits; unit tests with `fakeredis` or mock.
 - [x] **M6-T03: Database Models & Alembic Migrations (`agentkit/db/models.py`, `migrations/`)**
   - **Criteria**: SQLAlchemy 2.0 models for `runs` and `steps` matching SPEC schema, with required indexes (`steps(run_id, step_no)`, `runs(session_id)`); initial Alembic migration script; test verifying migration up and down.
-- [ ] **M6-T04: PostgreSQL Run & Step Repository (`agentkit/memory/pg_store.py`)**
+- [x] **M6-T04: PostgreSQL Run & Step Repository (`agentkit/memory/pg_store.py`)**
   - **Criteria**: Async repository methods for creating runs, updating status/final answer/failure reason, and querying run summary and full trace; unit tests with test database or mock async session.
 
 ---

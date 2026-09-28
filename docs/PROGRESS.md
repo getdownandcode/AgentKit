@@ -29,6 +29,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M6-T01  | M6        | Abstract MemoryStore Interface | `feat/memory-store-base` | #22 | 2 | Done | MemoryStore ABC, immutable RunRecord model, InMemoryMemoryStore |
 | M6-T02  | M6        | Async Redis Session Store | `feat/redis-memory-store` | #23 | 2 | Done | RedisMemoryStore, session key TTL, sliding window truncation |
 | M6-T03  | M6        | Database Models & Alembic Migrations | `feat/alembic-migrations` | #24 | 2 | Done | alembic.ini, env.py, 001_initial migration, upgrade/downgrade test |
+| M6-T04  | M6        | PostgreSQL Run & Step Repository | `feat/pg-memory-store` | #25 | 2 | Done | PostgresMemoryStore, run lifecycle, trace retrieval, session filters |
 
 ---
 
@@ -181,6 +182,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #24
 - **Commits**: 2
 - **Notes**: Configured Alembic with `alembic.ini`, `migrations/env.py` (with support for asyncpg and sync drivers), and initial schema revision `001_initial_runs_and_steps.py` establishing `runs` and `steps` tables, foreign keys, and indexes. Integration test in `tests/integration/test_migrations.py`.
+
+### M6-T04: PostgreSQL Run & Step Repository
+- **Status**: Done
+- **PR**: #25
+- **Commits**: 2
+- **Notes**: Implemented `PostgresMemoryStore` in `agentkit/memory/pg_store.py` providing asynchronous run creation, status and metrics updating, single run retrieval, step trace querying ordered by step number, and session-filtered run listing. Unit tests with in-memory SQLite in `tests/unit/test_pg_store.py`.
+
 
 
 
