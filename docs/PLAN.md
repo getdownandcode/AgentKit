@@ -53,7 +53,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Evaluates basic math expressions using Python `ast` with strict operator whitelist (`+`, `-`, `*`, `/`, `**`, `%`, `//`, parentheses); strict rejection of variable lookups, calls, imports, and strings; zero `eval`/`exec`; unit tests for arithmetic and malicious payloads.
 - [x] **M4-T02: Sandboxed File Reader Tool (`agentkit/tools/builtin/read_file.py`)**
   - **Criteria**: Reads file content restricted to `FILE_TOOL_BASE_DIR`; resolves absolute and canonical symlink paths; rejects path traversal (`../`) and out-of-bounds symlinks; enforces maximum byte limit; unit tests for valid reads and security boundary violations.
-- [ ] **M4-T03: SSRF-Protected HTTP Fetch Tool (`agentkit/tools/builtin/http_fetch.py`)**
+- [x] **M4-T03: SSRF-Protected HTTP Fetch Tool (`agentkit/tools/builtin/http_fetch.py`)**
   - **Criteria**: Asynchronous HTTP GET fetching web pages; blocks non-HTTP/HTTPS schemes, localhost (`127.0.0.1`), link-local metadata (`169.254.169.254`), and RFC1918 private subnets; response size limit and timeout; unit tests with IP validator and mock network calls.
 - [ ] **M4-T04: Read-Only SQL Tool (`agentkit/tools/builtin/sql_readonly.py`)**
   - **Criteria**: Validates query against single `SELECT` statement AST/lexer; rejects comments (`--`, `/*`), semicolons/multiple statements, DDL/DML keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `EXEC`); enforces `LIMIT` capping and statement timeout; unit tests verify injection attempts and clean select execution.
