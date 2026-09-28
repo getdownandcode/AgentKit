@@ -1,27 +1,38 @@
-"""FastAPI router endpoints for managing agent runs and telemetry."""
-
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from agentkit.api.auth import verify_api_key
-from agentkit.api.deps import get_agent, get_memory_store, get_trace_sink
+from agentkit.api.deps import (
+    get_agent,
+    get_memory_store,
+    get_tool_registry,
+    get_trace_sink,
+)
 from agentkit.api.schemas import (
+    HealthCheckResponse,
     RunCreateRequest,
     RunResponse,
     RunTraceResponse,
     StepTraceResponse,
+    ToolSchemaResponse,
+    ToolsListResponse,
 )
 from agentkit.core.agent import Agent
 from agentkit.core.errors import RunNotFoundError
 from agentkit.core.trace import StepTrace, TraceSink
 from agentkit.memory.base import MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
+from agentkit.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(verify_api_key)])
+runs_router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(verify_api_key)])
+router = runs_router  # alias for backwards compatibility
+discovery_router = APIRouter(tags=["discovery"])
 
 
 @router.post("", response_model=RunResponse)
@@ -126,4 +137,74 @@ async def get_run_trace(
             )
             for t in traces
         ],
+    )
+
+
+@discovery_router.get("/health", response_model=HealthCheckResponse)
+async def health_check(request: Request) -> JSONResponse:
+    """Verify application liveness and connectivity to database and Redis."""
+    status_code = 200
+    db_status = "healthy"
+    redis_status = "healthy"
+    details: dict[str, str] = {}
+
+    # Check Database Engine
+    engine = getattr(request.app.state, "db_engine", None)
+    if engine is not None:
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception as exc:
+            db_status = "unhealthy"
+            details["database"] = str(exc)
+            status_code = 503
+    else:
+        db_status = "disabled"
+
+    # Check Redis Client
+    redis_client = getattr(request.app.state, "redis_client", None)
+    if redis_client is not None:
+        try:
+            ping_res = await redis_client.ping()
+            if not ping_res:
+                redis_status = "unhealthy"
+                details["redis"] = "Ping returned False"
+                status_code = 503
+        except Exception as exc:
+            redis_status = "unhealthy"
+            details["redis"] = str(exc)
+            status_code = 503
+    else:
+        redis_status = "disabled"
+
+    overall_status = "healthy" if status_code == 200 else "unhealthy"
+    content = HealthCheckResponse(
+        status=overall_status,
+        database=db_status,
+        redis=redis_status,
+        details=details,
+    ).model_dump()
+
+    return JSONResponse(status_code=status_code, content=content)
+
+
+@discovery_router.get(
+    "/tools",
+    response_model=ToolsListResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def list_tools(
+    tool_registry: ToolRegistry = Depends(get_tool_registry),
+) -> ToolsListResponse:
+    """List all registered tools and their JSON schemas."""
+    schemas = tool_registry.schemas()
+    return ToolsListResponse(
+        tools=[
+            ToolSchemaResponse(
+                name=s.name,
+                description=s.description,
+                parameters=s.parameters,
+            )
+            for s in schemas
+        ]
     )

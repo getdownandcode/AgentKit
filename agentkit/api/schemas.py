@@ -62,3 +62,37 @@ class RunTraceResponse(BaseModel):
     steps: list[StepTraceResponse] = Field(
         default_factory=list, description="Chronological sequence of step traces."
     )
+
+
+class ToolSchemaResponse(BaseModel):
+    """Schema specification for an individual registered tool."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(..., description="Unique tool identifier name.")
+    description: str = Field(..., description="Description of tool functionality.")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="JSON schema describing tool parameter structure.",
+    )
+
+
+class ToolsListResponse(BaseModel):
+    """List of all registered tools and their input schemas."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tools: list[ToolSchemaResponse] = Field(default_factory=list, description="Registered tools.")
+
+
+class HealthCheckResponse(BaseModel):
+    """Liveness and dependency connectivity status report."""
+
+    model_config = ConfigDict(frozen=True)
+
+    status: str = Field(..., description="'healthy' or 'unhealthy'.")
+    database: str = Field(..., description="'healthy', 'unhealthy', or 'disabled'.")
+    redis: str = Field(..., description="'healthy', 'unhealthy', or 'disabled'.")
+    details: dict[str, str] = Field(
+        default_factory=dict, description="Detailed diagnostic messages if degraded."
+    )
