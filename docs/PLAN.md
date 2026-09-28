@@ -41,7 +41,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: `Agent` class initialized with injected dependencies (`llm`, `registry`, `memory`, `trace`, `config`); `AgentConfig` model defining limits and system prompt; test verifying clean dependency injection.
 - [x] **M3-T02: Core ReAct Reasoning Step Loop**
   - **Criteria**: Iterative loop invoking `llm.chat()`, dispatching tool execution when `tool_calls` are present, appending tool responses to conversation history, and exiting when a final text response is produced; unit tests verify single-turn and multi-turn tool loops.
-- [ ] **M3-T03: Loop Termination, Max Steps, and Timeout Guards**
+- [x] **M3-T03: Loop Termination, Max Steps, and Timeout Guards**
   - **Criteria**: Enforce `MAX_STEPS` raising `MaxStepsExceeded` or setting `RunStatus.MAX_STEPS_EXCEEDED`; enforce total run timeout (`run_timeout_s`) transitioning to `RunStatus.TIMED_OUT`; unit tests verify both guardrails fire appropriately.
 - [ ] **M3-T04: Duplicate Tool Call & Infinite Loop Detection**
   - **Criteria**: Detection of identical consecutive tool calls (same tool name and arguments repeatedly); run halts with descriptive failure reason and status `failed`; unit tests verify prevention of repetitive loops.
