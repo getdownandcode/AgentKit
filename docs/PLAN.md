@@ -31,7 +31,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Abstract base class / Protocol defining `async def chat(messages, tools) -> LLMResponse`; neutral `Message`, `ToolCall`, `LLMResponse`, `TokenUsage` models defined.
 - [x] **M2-T02: Scripted `FakeLLMClient` for Deterministic Testing (`agentkit/llm/fake.py`)**
   - **Criteria**: Mock client capable of queuing sequential scripted responses (text answers or tool call requests) and recording received message history; unit tests validating deterministic mock chat turns.
-- [ ] **M2-T03: Google Gemini SDK Adapter (`agentkit/llm/gemini.py`)**
+- [x] **M2-T03: Google Gemini SDK Adapter (`agentkit/llm/gemini.py`)**
   - **Criteria**: Implementation using `google-genai` SDK; translates neutral messages and tool schemas to Gemini Content/Part and FunctionDeclaration formats; parses Gemini function call responses into `ToolCall` objects; unit tests with mocked SDK client.
 
 ---
