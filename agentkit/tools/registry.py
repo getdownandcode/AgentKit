@@ -4,11 +4,14 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
 from agentkit.tools.models import ToolSchema
+
+if TYPE_CHECKING:
+    from agentkit.tools.models import ToolCall, ToolResult
 from agentkit.tools.schema import create_tool_schema
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -82,6 +85,22 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         """Return names of all registered tools."""
         return list(self._tools.keys())
+
+    async def execute(
+        self,
+        tool_call: "ToolCall",
+        timeout_s: float = 15.0,
+        max_chars: int = 2000,
+    ) -> "ToolResult":
+        """Safely execute a tool call and return structured ToolResult."""
+        from agentkit.tools.executor import execute_tool
+
+        return await execute_tool(
+            self,
+            tool_call,
+            default_timeout_s=timeout_s,
+            max_chars=max_chars,
+        )
 
 
 # Default global registry for convenience
