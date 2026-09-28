@@ -24,6 +24,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M4-T04  | M4        | Read-Only SQL Tool | `feat/readonly-sql-tool` | #17 | 2 | Done | Strict SELECT AST validation, DDL/DML rejection, Markdown formatting |
 | M4-T05  | M4        | Web Search Tool Adapter | `feat/web-search-tool` | #18 | 2 | Done | Tavily search integration, error handling for missing key, formatted snippets |
 | M5-T01  | M5        | TraceSink Protocol & InMemoryTraceSink | `feat/trace-sink-base` | #19 | 2 | Done | StepTrace model, TraceSink ABC, InMemoryTraceSink, Agent.run() trace wiring |
+| M5-T02  | M5        | Contextual Structured JSON Logger | `feat/structured-logging` | #20 | 2 | Done | JSONFormatter, contextvars run_id/step_no propagation, Agent logging |
 
 ---
 
@@ -146,6 +147,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #19
 - **Commits**: 2
 - **Notes**: Implemented `StepTrace` frozen Pydantic model and `TraceSink` abstract interface in `agentkit/core/trace.py`, along with `InMemoryTraceSink` and execution trace hook integration in `Agent.run()`. Unit tests in `tests/unit/test_trace.py`.
+
+### M5-T02: Contextual Structured JSON Logger
+- **Status**: Done
+- **PR**: #20
+- **Commits**: 2
+- **Notes**: Implemented `JSONFormatter` and async-safe context propagation (`log_context`, `set_current_run_id`, `set_current_step_no`) in `agentkit/core/log.py`. Integrated contextual logging into `Agent.run()` so that all log records emitted during a run are automatically tagged with `run_id` and sequential `step_no`. Unit tests in `tests/unit/test_log.py`.
+
 
 
 
