@@ -1,7 +1,5 @@
 """Unit tests for domain errors and core enums."""
 
-import pytest
-
 from agentkit.core.errors import (
     AgentKitError,
     AuthenticationError,
@@ -18,17 +16,21 @@ from agentkit.core.types import Role, RunStatus
 
 def test_core_enums() -> None:
     """Verify RunStatus and Role enum values and string behavior."""
-    assert RunStatus.PENDING == "pending"
-    assert RunStatus.RUNNING == "running"
-    assert RunStatus.SUCCEEDED == "succeeded"
-    assert RunStatus.FAILED == "failed"
-    assert RunStatus.MAX_STEPS_EXCEEDED == "max_steps_exceeded"
-    assert RunStatus.TIMED_OUT == "timed_out"
+    assert RunStatus.PENDING.value == "pending"
+    assert RunStatus.RUNNING.value == "running"
+    assert RunStatus.SUCCEEDED.value == "succeeded"
+    assert RunStatus.FAILED.value == "failed"
+    assert RunStatus.MAX_STEPS_EXCEEDED.value == "max_steps_exceeded"
+    assert RunStatus.TIMED_OUT.value == "timed_out"
 
-    assert Role.SYSTEM == "system"
-    assert Role.USER == "user"
-    assert Role.ASSISTANT == "assistant"
-    assert Role.TOOL == "tool"
+    assert Role.SYSTEM.value == "system"
+    assert Role.USER.value == "user"
+    assert Role.ASSISTANT.value == "assistant"
+    assert Role.TOOL.value == "tool"
+
+    # Verify string representation
+    assert str(Role.SYSTEM) == "system"
+    assert str(RunStatus.SUCCEEDED) == "succeeded"
 
 
 def test_agentkit_error_hierarchy_and_serialization() -> None:
