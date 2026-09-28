@@ -12,6 +12,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M1-T03  | M1        | @tool Decorator & Registry Storage | `feat/tool-registry-decorator` | #5 | 2 | Done | ToolRegistry and generic @tool decorator |
 | M1-T04  | M1        | Safe Tool Execution Engine | `feat/tool-executor` | #6 | 2 | Done | Safe execution with threadpool, timeouts, truncation |
 | M2-T01  | M2        | Abstract LLMClient Interface | `feat/llm-client-base` | #7 | 2 | Done | LLMClient ABC, Message, TokenUsage, LLMResponse |
+| M2-T02  | M2        | Scripted FakeLLMClient | `feat/fake-llm-client` | #8 | 2 | Done | Deterministic FIFO mock client with history tracking |
 
 ---
 
@@ -62,3 +63,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #7
 - **Commits**: 2
 - **Notes**: Implemented `LLMClient` ABC, `Message`, `TokenUsage`, and `LLMResponse` in `agentkit/llm/base.py`. Unit tests in `tests/unit/test_llm_base.py`.
+
+### M2-T02: Scripted FakeLLMClient
+- **Status**: Done
+- **PR**: #8
+- **Commits**: 2
+- **Notes**: Implemented `FakeLLMClient` in `agentkit/llm/fake.py` supporting FIFO scripted responses, queue helpers, call history, and tools history. Unit tests in `tests/unit/test_fake_llm.py`.
