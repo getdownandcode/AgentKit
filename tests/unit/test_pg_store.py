@@ -1,15 +1,12 @@
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
-import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentkit.core.trace import StepTrace
 from agentkit.core.types import RunStatus
 from agentkit.db.models import Base, Step
-from agentkit.memory.base import RunRecord
 from agentkit.memory.pg_store import PostgresMemoryStore
 
 
