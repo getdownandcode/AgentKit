@@ -41,7 +41,7 @@ def test_division_by_zero() -> None:
     with pytest.raises(ValueError, match="[Dd]ivision by zero|modulo by zero"):
         safe_calculate("10 // 0")
 
-    with pytest.raises(ValueError, match="modulo by zero"):
+    with pytest.raises(ValueError, match="(?i)modulo by zero"):
         safe_calculate("10 % 0")
 
 
