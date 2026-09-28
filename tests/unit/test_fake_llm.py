@@ -4,7 +4,7 @@ import pytest
 
 from agentkit.llm.base import LLMResponse, Message, TokenUsage
 from agentkit.llm.fake import FakeLLMClient
-from agentkit.tools.models import ToolCall, ToolSchema
+from agentkit.tools.models import ToolSchema
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,9 @@ async def test_fake_llm_queue_exhaustion() -> None:
 @pytest.mark.asyncio
 async def test_fake_llm_fallback_default_response() -> None:
     """Verify default response is used if queue is exhausted."""
-    fallback = LLMResponse(text="Default fallback", usage=TokenUsage(input_tokens=5, output_tokens=5))
+    fallback = LLMResponse(
+        text="Default fallback", usage=TokenUsage(input_tokens=5, output_tokens=5)
+    )
     client = FakeLLMClient(default_response=fallback)
 
     resp1 = await client.chat([Message.user("1")])
