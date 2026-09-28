@@ -9,6 +9,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M0-T03  | M0        | Domain Errors & Core Base Types | `feat/core-errors-types` | #2 | 2 | Done | AgentKitError hierarchy, to_dict, StrEnum types |
 | M1-T01  | M1        | Tool Models & ToolResult Specification | `feat/tool-models` | #3 | 2 | Done | ToolResult, ToolCall, and ToolSchema models |
 | M1-T02  | M1        | Signature Inspection & JSON Schema Generator | `feat/tool-schema-generator` | #4 | 2 | Done | Dynamic Pydantic schema generator from callables |
+| M1-T03  | M1        | @tool Decorator & Registry Storage | `feat/tool-registry-decorator` | #5 | 2 | Done | ToolRegistry and generic @tool decorator |
 
 ---
 
@@ -41,3 +42,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #4
 - **Commits**: 2
 - **Notes**: Implemented `create_tool_schema` in `agentkit/tools/schema.py` using inspect and dynamic Pydantic model creation. Unit tests in `tests/unit/test_tool_schema.py`.
+
+### M1-T03: @tool Decorator & Registry Storage
+- **Status**: Done
+- **PR**: #5
+- **Commits**: 2
+- **Notes**: Implemented `ToolRegistry` and `@tool` with generic type-preserving overloads in `agentkit/tools/registry.py`. Unit tests in `tests/unit/test_tool_registry.py`.
