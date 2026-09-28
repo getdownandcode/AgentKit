@@ -1,6 +1,6 @@
+import pytest
 from fastapi import APIRouter, Depends
 from fastapi.testclient import TestClient
-import pytest
 
 from agentkit.api.auth import verify_api_key
 from agentkit.api.main import create_app
