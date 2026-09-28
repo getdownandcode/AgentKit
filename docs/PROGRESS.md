@@ -19,6 +19,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M3-T03  | M3        | Loop Termination & Timeout Guards | `feat/loop-guards` | #12 | 2 | Done | asyncio.timeout wrapper, max steps & timeout RunStatus handling |
 | M3-T04  | M3        | Duplicate Tool Call Loop Detection | `feat/duplicate-tool-loop-detector` | #13 | 2 | Done | Infinite loop detection with canonical args & threshold abort |
 | M4-T01  | M4        | Safe AST Calculator Tool | `feat/safe-calculator-tool` | #14 | 2 | Done | Strict AST arithmetic parser with zero eval/exec and DoS guards |
+| M4-T02  | M4        | Sandboxed File Reader Tool | `feat/sandboxed-file-reader-tool` | #15 | 2 | Done | FILE_TOOL_BASE_DIR sandboxing, path traversal & symlink defense |
 
 ---
 
@@ -111,6 +112,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #14
 - **Commits**: 2
 - **Notes**: Implemented `calculator` tool and `safe_calculate` in `agentkit/tools/builtin/calculator.py` using Python `ast` parsing, operator whitelist, node count limit, and exponent limit. 24 unit and security tests in `tests/unit/test_tool_calculator.py`.
+
+### M4-T02: Sandboxed File Reader Tool
+- **Status**: Done
+- **PR**: #15
+- **Commits**: 2
+- **Notes**: Implemented `read_file` tool and `read_sandboxed_file` in `agentkit/tools/builtin/read_file.py` with strict `FILE_TOOL_BASE_DIR` sandboxing, symlink escape defenses, path traversal protection, size caps, and UTF-8 verification. Unit tests in `tests/unit/test_tool_read_file.py`.
+
 
 
 
