@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from agentkit.api.routes import discovery_router
 from agentkit.api.routes import router as runs_router
 from agentkit.config import Settings, get_settings
 from agentkit.core.errors import (
@@ -126,6 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(runs_router)
+    app.include_router(discovery_router)
 
     return app
 

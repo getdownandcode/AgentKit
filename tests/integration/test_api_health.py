@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
 import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
@@ -6,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from agentkit.api.main import create_app
 from agentkit.config import Settings
-from agentkit.db.models import Base
 from agentkit.tools.builtin.calculator import calculator
 from agentkit.tools.registry import ToolRegistry
 
@@ -44,7 +44,8 @@ async def test_health_healthy_stack() -> None:
     assert data["redis"] == "healthy"
 
     await engine.dispose()
-    await fake_redis.aclose()
+    aclose_fn = getattr(fake_redis, "aclose", fake_redis.close)
+    await aclose_fn()
 
 
 @pytest.mark.asyncio
@@ -53,8 +54,10 @@ async def test_health_unhealthy_when_db_down() -> None:
     app = create_app(settings=settings)
 
     # Attach broken DB mock
-    broken_engine = AsyncMock()
-    broken_engine.connect.side_effect = ConnectionRefusedError("Database unreachable")
+    conn_mock = AsyncMock()
+    conn_mock.__aenter__.side_effect = ConnectionRefusedError("Database unreachable")
+    broken_engine = MagicMock()
+    broken_engine.connect.return_value = conn_mock
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     app.state.db_engine = broken_engine
@@ -68,7 +71,8 @@ async def test_health_unhealthy_when_db_down() -> None:
     assert data["database"] == "unhealthy"
     assert data["redis"] == "healthy"
 
-    await fake_redis.aclose()
+    aclose_fn = getattr(fake_redis, "aclose", fake_redis.close)
+    await aclose_fn()
 
 
 def test_tools_auth_required() -> None:
