@@ -1,8 +1,10 @@
 """Unit and security tests for read-only SQL execution tool."""
 
+from collections.abc import AsyncIterator
+
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from agentkit.tools.builtin.sql_readonly import (
     execute_sql_query,
@@ -19,7 +21,10 @@ def test_valid_select_queries_pass_validation() -> None:
         validate_sql_query("SELECT id, name FROM products WHERE price > 10;")
         == "SELECT id, name FROM products WHERE price > 10"
     )
-    assert validate_sql_query("SELECT count(*) as total FROM orders") == "SELECT count(*) as total FROM orders"
+    assert (
+        validate_sql_query("SELECT count(*) as total FROM orders")
+        == "SELECT count(*) as total FROM orders"
+    )
 
 
 def test_valid_cte_select_passes_validation() -> None:
@@ -86,13 +91,11 @@ def test_non_select_start_rejected() -> None:
 
 
 @pytest.fixture
-async def demo_db_engine():
+async def demo_db_engine() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.execute(
-            text(
-                "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer TEXT, amount REAL);"
-            )
+            text("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer TEXT, amount REAL);")
         )
         await conn.execute(
             text(
@@ -104,8 +107,10 @@ async def demo_db_engine():
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_success(demo_db_engine) -> None:
-    output = await execute_sql_query("SELECT customer, amount FROM orders ORDER BY id ASC", engine=demo_db_engine)
+async def test_execute_sql_query_success(demo_db_engine: AsyncEngine) -> None:
+    output = await execute_sql_query(
+        "SELECT customer, amount FROM orders ORDER BY id ASC", engine=demo_db_engine
+    )
     assert "| customer | amount |" in output
     assert "Alice" in output
     assert "Bob" in output
@@ -113,13 +118,15 @@ async def test_execute_sql_query_success(demo_db_engine) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_empty_result(demo_db_engine) -> None:
-    output = await execute_sql_query("SELECT * FROM orders WHERE amount > 1000", engine=demo_db_engine)
+async def test_execute_sql_query_empty_result(demo_db_engine: AsyncEngine) -> None:
+    output = await execute_sql_query(
+        "SELECT * FROM orders WHERE amount > 1000", engine=demo_db_engine
+    )
     assert output == "No rows returned."
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_row_limit(demo_db_engine) -> None:
+async def test_execute_sql_query_row_limit(demo_db_engine: AsyncEngine) -> None:
     output = await execute_sql_query("SELECT * FROM orders", engine=demo_db_engine, row_limit=2)
     # Header + separator + 2 rows = 4 lines
     lines = [line for line in output.strip().split("\n") if line.strip()]
@@ -127,14 +134,22 @@ async def test_execute_sql_query_row_limit(demo_db_engine) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sql_tool_registry_integration(demo_db_engine, monkeypatch) -> None:
+async def test_sql_tool_registry_integration(
+    demo_db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
     registry = ToolRegistry()
     registry.register(sql_readonly)
 
     # Patch default engine
-    monkeypatch.setattr("agentkit.tools.builtin.sql_readonly.get_readonly_engine", lambda: demo_db_engine)
+    monkeypatch.setattr(
+        "agentkit.tools.builtin.sql_readonly.get_readonly_engine", lambda: demo_db_engine
+    )
 
-    call = ToolCall(id="c1", name="sql_readonly", arguments={"query": "SELECT customer FROM orders WHERE id = 1"})
+    call = ToolCall(
+        id="c1",
+        name="sql_readonly",
+        arguments={"query": "SELECT customer FROM orders WHERE id = 1"},
+    )
     result = await registry.execute(call)
     assert result.ok is True
     assert "Alice" in result.output
