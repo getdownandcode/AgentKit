@@ -1,7 +1,7 @@
 import pytest
 
-from agentkit.core.types import RunStatus
-from agentkit.llm.base import Message, Role
+from agentkit.core.types import Role, RunStatus
+from agentkit.llm.base import Message
 from agentkit.memory.base import InMemoryMemoryStore, MemoryStore, RunRecord
 
 
