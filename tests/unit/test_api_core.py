@@ -1,10 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
-import pytest
 from pydantic import BaseModel
 
 from agentkit.api.main import create_app
-from agentkit.config import Settings
 from agentkit.core.errors import ToolNotFoundError, ToolSecurityError
 
 
@@ -60,7 +58,10 @@ def test_validation_exception_handler() -> None:
     assert resp.status_code == 422
     data = resp.json()
     assert data["error"]["code"] == "VALIDATION_ERROR"
-    assert "validation" in data["error"]["message"].lower() or "input" in data["error"]["message"].lower()
+    assert (
+        "validation" in data["error"]["message"].lower()
+        or "input" in data["error"]["message"].lower()
+    )
 
 
 def test_internal_exception_handler() -> None:

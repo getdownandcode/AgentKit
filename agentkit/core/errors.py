@@ -136,3 +136,15 @@ class LLMProviderError(AgentKitError):
         )
         self.provider = provider
         self.status_code = status_code
+
+
+class ToolSecurityError(ToolError):
+    """Raised when a tool operation violates sandboxing or security boundaries."""
+
+    def __init__(self, message: str, tool_name: str = "security") -> None:
+        super().__init__(tool_name, message, code="TOOL_SECURITY_ERROR")
+
+
+# Aliases for convenience
+ToolNotFoundError = ToolNotFound
+LLMRateLimitError = RateLimitExceededError
