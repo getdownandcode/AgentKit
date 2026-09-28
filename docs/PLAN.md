@@ -27,7 +27,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 2: LLM Adapter Base & Google Gemini
-- [ ] **M2-T01: Abstract `LLMClient` Interface (`agentkit/llm/base.py`)**
+- [x] **M2-T01: Abstract `LLMClient` Interface (`agentkit/llm/base.py`)**
   - **Criteria**: Abstract base class / Protocol defining `async def chat(messages, tools) -> LLMResponse`; neutral `Message`, `ToolCall`, `LLMResponse`, `TokenUsage` models defined.
 - [ ] **M2-T02: Scripted `FakeLLMClient` for Deterministic Testing (`agentkit/llm/fake.py`)**
   - **Criteria**: Mock client capable of queuing sequential scripted responses (text answers or tool call requests) and recording received message history; unit tests validating deterministic mock chat turns.
