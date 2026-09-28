@@ -57,12 +57,14 @@ def test_public_url_validation_passes() -> None:
 
 def test_dns_rebinding_or_private_resolution_blocked() -> None:
     # If a public domain resolves to a private IP
-    with patch(
-        "agentkit.tools.builtin.http_fetch.resolve_host_ips",
-        return_value=["10.0.0.1"],
+    with (
+        patch(
+            "agentkit.tools.builtin.http_fetch.resolve_host_ips",
+            return_value=["10.0.0.1"],
+        ),
+        pytest.raises(ValueError, match="SSRF protection blocked"),
     ):
-        with pytest.raises(ValueError, match="SSRF protection blocked"):
-            validate_url_ssrf("https://malicious-internal-rebind.com")
+        validate_url_ssrf("https://malicious-internal-rebind.com")
 
 
 @pytest.mark.asyncio
@@ -140,12 +142,16 @@ async def test_tool_registry_integration() -> None:
         with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_response
 
-            call = ToolCall(id="c1", name="http_fetch", arguments={"url": "https://api.example.com"})
+            call = ToolCall(
+                id="c1", name="http_fetch", arguments={"url": "https://api.example.com"}
+            )
             result = await registry.execute(call)
             assert result.ok is True
             assert result.output == "API Docs"
 
-    bad_call = ToolCall(id="c2", name="http_fetch", arguments={"url": "http://169.254.169.254/latest"})
+    bad_call = ToolCall(
+        id="c2", name="http_fetch", arguments={"url": "http://169.254.169.254/latest"}
+    )
     bad_result = await registry.execute(bad_call)
     assert bad_result.ok is False
     assert "SSRF protection blocked" in (bad_result.error or "")
