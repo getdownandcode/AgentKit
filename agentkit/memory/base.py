@@ -32,8 +32,8 @@ class RunRecord(BaseModel):
     finished_at: datetime | None = Field(default=None, description="Run completion timestamp.")
 
 
-class MemoryStore(ABC):
-    """Abstract interface defining operations for session message history and run state persistence."""
+class SessionStore(ABC):
+    """Abstract interface defining conversation message history operations for a session."""
 
     @abstractmethod
     async def get_messages(self, session_id: str) -> list[Message]:
@@ -46,6 +46,10 @@ class MemoryStore(ABC):
     @abstractmethod
     async def clear_session(self, session_id: str) -> None:
         """Clear conversation history for a session."""
+
+
+class MemoryStore(SessionStore, ABC):
+    """Abstract interface defining operations for session message history and run state persistence."""
 
     @abstractmethod
     async def create_run(
