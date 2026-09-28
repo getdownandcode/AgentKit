@@ -71,8 +71,9 @@ async def test_concrete_llm_client_subclass() -> None:
             messages: list[Message],
             tools: list[ToolSchema] | None = None,
         ) -> LLMResponse:
-            return LLMResponse(text=f"Echo {len(messages)} messages")
+            tool_count = len(tools or [])
+            return LLMResponse(text=f"Echo {len(messages)} messages with {tool_count} tools")
 
     client = DummyClient()
     resp = await client.chat([Message.user("Hello")])
-    assert resp.text == "Echo 1 messages"
+    assert resp.text == "Echo 1 messages with 0 tools"
