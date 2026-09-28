@@ -1,12 +1,14 @@
 """Agent runtime state machine and configuration."""
 
+import contextlib
+import time
 import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentkit.core.types import RunStatus
-from agentkit.llm.base import LLMClient
+from agentkit.llm.base import LLMClient, Message
 from agentkit.tools.registry import ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = """You are an autonomous AI agent capable of using tools to accomplish user goals.
@@ -83,11 +85,86 @@ class Agent:
         goal: str,
         session_id: str | None = None,
     ) -> RunResult:
-        """Execute a goal within a ReAct loop. (Extended in M3-T02)."""
+        """Execute a user goal within an autonomous ReAct loop."""
+        start_time = time.perf_counter()
         run_id = str(uuid.uuid4())
+
+        messages: list[Message] = [
+            Message.system(self.config.system_prompt),
+            Message.user(goal),
+        ]
+
+        total_input_tokens = 0
+        total_output_tokens = 0
+        steps_count = 0
+
+        for _ in range(self.config.max_steps):
+            steps_count += 1
+            response = await self.llm.chat(messages, tools=self.registry.schemas())
+            total_input_tokens += response.usage.input_tokens
+            total_output_tokens += response.usage.output_tokens
+
+            if response.tool_calls:
+                # Append assistant tool-call turn
+                messages.append(
+                    Message.assistant(
+                        content=response.text,
+                        tool_calls=response.tool_calls,
+                    )
+                )
+
+                # Execute each requested tool call
+                for call in response.tool_calls:
+                    result = await self.registry.execute(
+                        call,
+                        timeout_s=self.config.tool_timeout_s,
+                        max_chars=self.config.tool_output_max_chars,
+                    )
+                    output_str = result.output if result.ok else f"ERROR: {result.error}"
+                    messages.append(
+                        Message.tool_result(
+                            tool_call_id=call.id,
+                            content=output_str,
+                        )
+                    )
+
+                    if self.trace is not None and hasattr(self.trace, "record"):
+                        with contextlib.suppress(Exception):
+                            await self.trace.record(
+                                run_id=run_id,
+                                step_no=steps_count,
+                                tool_name=call.name,
+                                args=call.arguments,
+                                result=result.model_dump(),
+                                error=result.error,
+                                latency_ms=result.latency_ms,
+                                input_tokens=response.usage.input_tokens,
+                                output_tokens=response.usage.output_tokens,
+                            )
+            else:
+                # Final natural language answer reached
+                duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
+                return RunResult(
+                    run_id=run_id,
+                    session_id=session_id,
+                    goal=goal,
+                    status=RunStatus.SUCCEEDED,
+                    final_answer=response.text,
+                    steps_count=steps_count,
+                    total_input_tokens=total_input_tokens,
+                    total_output_tokens=total_output_tokens,
+                    duration_ms=duration_ms,
+                )
+
+        duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
         return RunResult(
             run_id=run_id,
             session_id=session_id,
             goal=goal,
-            status=RunStatus.PENDING,
+            status=RunStatus.MAX_STEPS_EXCEEDED,
+            failure_reason=f"Exceeded max steps ({self.config.max_steps})",
+            steps_count=steps_count,
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
+            duration_ms=duration_ms,
         )
