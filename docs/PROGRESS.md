@@ -196,6 +196,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `create_app` factory in `agentkit/api/main.py` with async lifespan context management for database engines and Redis connection pools, plus unified global exception handlers translating `AgentKitError`, `RequestValidationError`, `HTTPException`, and server exceptions into standard `{"error": {"code": "...", "message": "..."}}` responses. Unit tests in `tests/unit/test_api_core.py`.
 
+### M7-T02: API Key Authentication Dependency
+- **Status**: Done
+- **PR**: #27
+- **Commits**: 2
+- **Notes**: Implemented `verify_api_key` security dependency in `agentkit/api/auth.py` validating incoming `X-API-Key` headers against configured `API_KEYS`. Mapped `AuthenticationError` to 401 Unauthorized in global exception handlers. Configured ruff for immutable FastAPI `Security` / `Depends` calls. Unit tests in `tests/unit/test_api_auth.py`.
+
 
 
 
