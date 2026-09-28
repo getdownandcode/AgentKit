@@ -202,6 +202,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `verify_api_key` security dependency in `agentkit/api/auth.py` validating incoming `X-API-Key` headers against configured `API_KEYS`. Mapped `AuthenticationError` to 401 Unauthorized in global exception handlers. Configured ruff for immutable FastAPI `Security` / `Depends` calls. Unit tests in `tests/unit/test_api_auth.py`.
 
+### M7-T03: Run Management Routes
+- **Status**: Done
+- **PR**: #28
+- **Commits**: 2
+- **Notes**: Implemented `POST /runs`, `GET /runs/{run_id}`, and `GET /runs/{run_id}/trace` in `agentkit/api/routes.py`. Defined Pydantic boundary models in `agentkit/api/schemas.py`. Created dependency injection providers in `agentkit/api/deps.py` and database session utilities in `agentkit/db/session.py`. Integrated automatic run persistence across completion and failure paths in `Agent.run`. Added `RunNotFoundError` mapped to 404. Integration tests in `tests/integration/test_api_runs.py`.
+
 
 
 
