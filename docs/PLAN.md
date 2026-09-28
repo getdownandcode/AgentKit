@@ -67,7 +67,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Define abstract `TraceSink` interface (`record(step, call, result, usage)`), `StepTrace` frozen model, `InMemoryTraceSink`, and fail-safe non-blocking trace recording in agent loop; unit tests for trace recording and error tolerance.
 - [x] **M5-T02: Contextual Structured JSON Logger (`agentkit/core/log.py`)**
   - **Criteria**: Structured JSON log formatter attaching `run_id` and `step_no` context via contextvars to all log entries; logger configuration helper; integration into agent loop; unit tests for log formatting and context propagation.
-- [ ] **M5-T03: PostgreSQL Trace Sink (`agentkit/core/pg_trace.py`)**
+- [x] **M5-T03: PostgreSQL Trace Sink (`agentkit/core/pg_trace.py`)**
   - **Criteria**: Async persistence of step records (`run_id`, `step_no`, `tool_name`, `args`, `result`, `latency_ms`, `input_tokens`, `output_tokens`) into database session; unit tests with mock DB session or in-memory async SQLite.
 
 ---

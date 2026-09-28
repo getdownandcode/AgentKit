@@ -25,6 +25,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M4-T05  | M4        | Web Search Tool Adapter | `feat/web-search-tool` | #18 | 2 | Done | Tavily search integration, error handling for missing key, formatted snippets |
 | M5-T01  | M5        | TraceSink Protocol & InMemoryTraceSink | `feat/trace-sink-base` | #19 | 2 | Done | StepTrace model, TraceSink ABC, InMemoryTraceSink, Agent.run() trace wiring |
 | M5-T02  | M5        | Contextual Structured JSON Logger | `feat/structured-logging` | #20 | 2 | Done | JSONFormatter, contextvars run_id/step_no propagation, Agent logging |
+| M5-T03  | M5        | PostgreSQL Trace Sink | `feat/postgres-trace-sink` | #21 | 2 | Done | PostgresTraceSink, Run & Step SQLAlchemy models, async SQLite test suite |
 
 ---
 
@@ -153,6 +154,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #20
 - **Commits**: 2
 - **Notes**: Implemented `JSONFormatter` and async-safe context propagation (`log_context`, `set_current_run_id`, `set_current_step_no`) in `agentkit/core/log.py`. Integrated contextual logging into `Agent.run()` so that all log records emitted during a run are automatically tagged with `run_id` and sequential `step_no`. Unit tests in `tests/unit/test_log.py`.
+
+### M5-T03: PostgreSQL Trace Sink
+- **Status**: Done
+- **PR**: #21
+- **Commits**: 2
+- **Notes**: Implemented `PostgresTraceSink` in `agentkit/core/pg_trace.py` and SQLAlchemy 2.0 `Run` and `Step` models in `agentkit/db/models.py` with composite index on `(run_id, step_no)` and defensive parent run creation. Unit tests with in-memory async SQLite in `tests/unit/test_pg_trace.py`.
+
 
 
 
