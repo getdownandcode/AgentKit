@@ -17,6 +17,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M3-T01  | M3        | Agent State Machine & Configuration | `feat/agent-state-machine` | #10 | 2 | Done | Agent class, AgentConfig, and RunResult models |
 | M3-T02  | M3        | Core ReAct Reasoning Step Loop | `feat/react-step-loop` | #11 | 2 | Done | Multi-step ReAct loop with tool invocation & answer exit |
 | M3-T03  | M3        | Loop Termination & Timeout Guards | `feat/loop-guards` | #12 | 2 | Done | asyncio.timeout wrapper, max steps & timeout RunStatus handling |
+| M3-T04  | M3        | Duplicate Tool Call Loop Detection | `feat/duplicate-tool-loop-detector` | #13 | 2 | Done | Infinite loop detection with canonical args & threshold abort |
 
 ---
 
@@ -97,4 +98,11 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #12
 - **Commits**: 2
 - **Notes**: Implemented `asyncio.timeout(config.run_timeout_s)` guard, `RunStatus.TIMED_OUT`, `RunStatus.MAX_STEPS_EXCEEDED`, and optional `raise_on_failure` in `agentkit/core/agent.py`. Updated `RunTimeoutError` signature in `agentkit/core/errors.py`. Unit tests in `tests/unit/test_agent_guards.py`.
+
+### M3-T04: Duplicate Tool Call Loop Detection
+- **Status**: Done
+- **PR**: #13
+- **Commits**: 2
+- **Notes**: Implemented `DuplicateToolCallLoopError` in `agentkit/core/errors.py`, `max_consecutive_duplicate_tool_calls` in `AgentConfig`, canonical JSON argument serialization, and loop aborting logic in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent_loop_detector.py`.
+
 
