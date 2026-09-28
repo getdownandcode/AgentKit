@@ -17,7 +17,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ## Milestone 1: Tool Registry & Decorator
 - [x] **M1-T01: Tool Models & `ToolResult` Specification (`agentkit/tools/models.py`)**
   - **Criteria**: `ToolResult` dataclass/model (`ok`, `output`, `error`, `truncated`, `latency_ms`), `ToolCall` and `ToolSchema` neutral representations; unit tests for serialization.
-- [ ] **M1-T02: Signature Inspection & JSON Schema Generator (`agentkit/tools/schema.py`)**
+- [x] **M1-T02: Signature Inspection & JSON Schema Generator (`agentkit/tools/schema.py`)**
   - **Criteria**: Utility inspecting Python function signatures, docstrings, type annotations, and default values to generate OpenAI/Gemini compatible JSON schemas via dynamic Pydantic model creation; unit tests covering primitives, optionals, and missing docstrings.
 - [ ] **M1-T03: `@tool` Decorator & Registry Storage (`agentkit/tools/registry.py`)**
   - **Criteria**: `@tool` decorator populating in-memory `ToolRegistry`; registry schema export (`schemas()`); lookup mechanism; unit tests for registration and duplicate handling.

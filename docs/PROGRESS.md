@@ -8,6 +8,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M0-T02  | M0        | Configuration Management | `feat/config-settings` | #1 | 2 | Done | Pydantic BaseSettings with env validation |
 | M0-T03  | M0        | Domain Errors & Core Base Types | `feat/core-errors-types` | #2 | 2 | Done | AgentKitError hierarchy, to_dict, StrEnum types |
 | M1-T01  | M1        | Tool Models & ToolResult Specification | `feat/tool-models` | #3 | 2 | Done | ToolResult, ToolCall, and ToolSchema models |
+| M1-T02  | M1        | Signature Inspection & JSON Schema Generator | `feat/tool-schema-generator` | #4 | 2 | Done | Dynamic Pydantic schema generator from callables |
 
 ---
 
@@ -34,3 +35,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #3
 - **Commits**: 2
 - **Notes**: Implemented frozen Pydantic models for ToolResult, ToolCall, and ToolSchema in `agentkit/tools/models.py`. Unit tests in `tests/unit/test_tool_models.py`.
+
+### M1-T02: Signature Inspection & JSON Schema Generator
+- **Status**: Done
+- **PR**: #4
+- **Commits**: 2
+- **Notes**: Implemented `create_tool_schema` in `agentkit/tools/schema.py` using inspect and dynamic Pydantic model creation. Unit tests in `tests/unit/test_tool_schema.py`.
