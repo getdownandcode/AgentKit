@@ -49,7 +49,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 4: Built-in Tools
-- [ ] **M4-T01: Safe AST Calculator Tool (`agentkit/tools/builtin/calculator.py`)**
+- [x] **M4-T01: Safe AST Calculator Tool (`agentkit/tools/builtin/calculator.py`)**
   - **Criteria**: Evaluates basic math expressions using Python `ast` with strict operator whitelist (`+`, `-`, `*`, `/`, `**`, `%`, `//`, parentheses); strict rejection of variable lookups, calls, imports, and strings; zero `eval`/`exec`; unit tests for arithmetic and malicious payloads.
 - [ ] **M4-T02: Sandboxed File Reader Tool (`agentkit/tools/builtin/read_file.py`)**
   - **Criteria**: Reads file content restricted to `FILE_TOOL_BASE_DIR`; resolves absolute and canonical symlink paths; rejects path traversal (`../`) and out-of-bounds symlinks; enforces maximum byte limit; unit tests for valid reads and security boundary violations.
