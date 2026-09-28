@@ -1,5 +1,6 @@
-from datetime import UTC, datetime
 import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -8,7 +9,7 @@ from agentkit.core.agent import Agent
 from agentkit.core.pg_trace import PostgresTraceSink
 from agentkit.core.trace import StepTrace
 from agentkit.core.types import RunStatus
-from agentkit.db.models import Base, Run, Step
+from agentkit.db.models import Base
 from agentkit.llm.base import LLMResponse, TokenUsage
 from agentkit.llm.fake import FakeLLMClient
 from agentkit.tools.models import ToolCall
@@ -16,7 +17,7 @@ from agentkit.tools.registry import ToolRegistry, tool
 
 
 @pytest.fixture
-async def async_session_factory():
+async def async_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """Create an in-memory SQLite async engine and sessionmaker for testing."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
@@ -28,7 +29,9 @@ async def async_session_factory():
 
 
 @pytest.mark.asyncio
-async def test_postgres_trace_sink_record_and_get(async_session_factory) -> None:
+async def test_postgres_trace_sink_record_and_get(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     sink = PostgresTraceSink(session_factory=async_session_factory)
     test_run_id = str(uuid.uuid4())
 
@@ -79,7 +82,9 @@ async def test_postgres_trace_sink_record_and_get(async_session_factory) -> None
 
 
 @pytest.mark.asyncio
-async def test_postgres_trace_sink_empty_traces(async_session_factory) -> None:
+async def test_postgres_trace_sink_empty_traces(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     sink = PostgresTraceSink(session_factory=async_session_factory)
     unknown_id = str(uuid.uuid4())
     traces = await sink.get_traces(unknown_id)
@@ -87,7 +92,9 @@ async def test_postgres_trace_sink_empty_traces(async_session_factory) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_with_postgres_trace_sink(async_session_factory) -> None:
+async def test_agent_with_postgres_trace_sink(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     sink = PostgresTraceSink(session_factory=async_session_factory)
     registry = ToolRegistry()
 
@@ -124,3 +131,25 @@ async def test_agent_with_postgres_trace_sink(async_session_factory) -> None:
     assert traces[0].args == {"x": 6, "y": 7}
     assert traces[0].result is not None
     assert traces[0].result["output"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_postgres_trace_sink_non_uuid_string(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    sink = PostgresTraceSink(session_factory=async_session_factory)
+    custom_run_id = "custom-arbitrary-run-identifier-123"
+
+    trace = StepTrace(
+        run_id=custom_run_id,
+        step_no=1,
+        tool_name="test_tool",
+        args={"arg": "val"},
+        latency_ms=5,
+    )
+    await sink.record(trace)
+
+    traces = await sink.get_traces(custom_run_id)
+    assert len(traces) == 1
+    assert traces[0].step_no == 1
+    assert traces[0].tool_name == "test_tool"
