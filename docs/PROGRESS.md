@@ -26,6 +26,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M5-T01  | M5        | TraceSink Protocol & InMemoryTraceSink | `feat/trace-sink-base` | #19 | 2 | Done | StepTrace model, TraceSink ABC, InMemoryTraceSink, Agent.run() trace wiring |
 | M5-T02  | M5        | Contextual Structured JSON Logger | `feat/structured-logging` | #20 | 2 | Done | JSONFormatter, contextvars run_id/step_no propagation, Agent logging |
 | M5-T03  | M5        | PostgreSQL Trace Sink | `feat/postgres-trace-sink` | #21 | 2 | Done | PostgresTraceSink, Run & Step SQLAlchemy models, async SQLite test suite |
+| M6-T01  | M6        | Abstract MemoryStore Interface | `feat/memory-store-base` | #22 | 2 | Done | MemoryStore ABC, immutable RunRecord model, InMemoryMemoryStore |
 
 ---
 
@@ -160,6 +161,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #21
 - **Commits**: 2
 - **Notes**: Implemented `PostgresTraceSink` in `agentkit/core/pg_trace.py` and SQLAlchemy 2.0 `Run` and `Step` models in `agentkit/db/models.py` with composite index on `(run_id, step_no)` and defensive parent run creation. Unit tests with in-memory async SQLite in `tests/unit/test_pg_trace.py`.
+
+### M6-T01: Abstract MemoryStore Interface
+- **Status**: Done
+- **PR**: #22
+- **Commits**: 2
+- **Notes**: Implemented abstract `MemoryStore` ABC in `agentkit/memory/base.py` for session conversation messages and run state persistence, along with `RunRecord` immutable model and `InMemoryMemoryStore` for local/test execution. Unit tests in `tests/unit/test_memory_base.py`.
+
 
 
 

@@ -73,7 +73,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 6: Memory Layer (Redis Session & PostgreSQL Persistence)
-- [ ] **M6-T01: Abstract `MemoryStore` Interface (`agentkit/memory/base.py`)**
+- [x] **M6-T01: Abstract `MemoryStore` Interface (`agentkit/memory/base.py`)**
   - **Criteria**: Abstract interface defining methods for loading and saving session messages, and persisting run state; unit tests with dummy in-memory implementation.
 - [ ] **M6-T02: Async Redis Session Store (`agentkit/memory/redis_store.py`)**
   - **Criteria**: Saves and retrieves conversation message lists keyed by `session_id`; enforces TTL (default 1 hour); sliding-window truncation of oldest non-system messages when exceeding message/token limits; unit tests with `fakeredis` or mock.
