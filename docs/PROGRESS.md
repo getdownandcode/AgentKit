@@ -22,6 +22,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M4-T02  | M4        | Sandboxed File Reader Tool | `feat/sandboxed-file-reader-tool` | #15 | 2 | Done | FILE_TOOL_BASE_DIR sandboxing, path traversal & symlink defense |
 | M4-T03  | M4        | SSRF-Protected HTTP Fetch Tool | `feat/ssrf-http-fetch-tool` | #16 | 2 | Done | DNS & IP SSRF validation, private/metadata blocking, safe redirect |
 | M4-T04  | M4        | Read-Only SQL Tool | `feat/readonly-sql-tool` | #17 | 2 | Done | Strict SELECT AST validation, DDL/DML rejection, Markdown formatting |
+| M4-T05  | M4        | Web Search Tool Adapter | `feat/web-search-tool` | #18 | 2 | Done | Tavily search integration, error handling for missing key, formatted snippets |
 
 ---
 
@@ -132,6 +133,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #17
 - **Commits**: 2
 - **Notes**: Implemented `sql_readonly` tool, `validate_sql_query`, and `execute_sql_query` in `agentkit/tools/builtin/sql_readonly.py` restricting execution strictly to single SELECT or WITH statements, blocking comments and DDL/DML, capping row count, and formatting results as Markdown tables. Unit tests in `tests/unit/test_tool_sql_readonly.py`.
+
+### M4-T05: Web Search Tool Adapter
+- **Status**: Done
+- **PR**: #18
+- **Commits**: 2
+- **Notes**: Implemented `web_search` tool and `search_web` in `agentkit/tools/builtin/web_search.py` connecting to Tavily search API, limiting results, handling missing API keys with informative errors, and formatting output as numbered snippets. Unit tests in `tests/unit/test_tool_web_search.py`.
+
 
 
 

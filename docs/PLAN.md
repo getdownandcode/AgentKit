@@ -57,7 +57,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Asynchronous HTTP GET fetching web pages; blocks non-HTTP/HTTPS schemes, localhost (`127.0.0.1`), link-local metadata (`169.254.169.254`), and RFC1918 private subnets; response size limit and timeout; unit tests with IP validator and mock network calls.
 - [x] **M4-T04: Read-Only SQL Tool (`agentkit/tools/builtin/sql_readonly.py`)**
   - **Criteria**: Validates query against single `SELECT` statement AST/lexer; rejects comments (`--`, `/*`), semicolons/multiple statements, DDL/DML keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `EXEC`); enforces `LIMIT` capping and statement timeout; unit tests verify injection attempts and clean select execution.
-- [ ] **M4-T05: Web Search Tool Adapter (`agentkit/tools/builtin/web_search.py`)**
+- [x] **M4-T05: Web Search Tool Adapter (`agentkit/tools/builtin/web_search.py`)**
   - **Criteria**: Fetches top search results from search API (e.g. Tavily/DuckDuckGo/SerpAPI); graceful error handling if `SEARCH_API_KEY` is omitted; result count cap and text summarization; unit tests with mocked search responses.
 
 ---
