@@ -9,7 +9,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: `.gitignore`, `pyproject.toml`, `.env.example`, `LICENSE`, `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/PLAN.md`, `docs/PROGRESS.md` created; directory layout established; verified with `ruff` and `pytest`.
 - [x] **M0-T02: Configuration Management (`agentkit/config.py`)**
   - **Criteria**: Pydantic `BaseSettings` loading all environment variables with types, sensible defaults, and validation; unit tests verify env overrides and validation errors.
-- [ ] **M0-T03: Domain Errors & Core Base Types (`agentkit/core/errors.py`, `types.py`)**
+- [x] **M0-T03: Domain Errors & Core Base Types (`agentkit/core/errors.py`, `types.py`)**
   - **Criteria**: Custom exception hierarchy (`AgentKitError`, `MaxStepsExceeded`, `ToolExecutionError`, `ToolNotFound`, `ToolValidationError`, `LLMProviderError`); core enums (`RunStatus`, `Role`); unit tests verifying error instantiation and serialization.
 
 ---
