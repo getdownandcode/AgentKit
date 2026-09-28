@@ -39,7 +39,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ## Milestone 3: ReAct Reasoning Loop
 - [x] **M3-T01: Agent State Machine & Configuration (`agentkit/core/agent.py`)**
   - **Criteria**: `Agent` class initialized with injected dependencies (`llm`, `registry`, `memory`, `trace`, `config`); `AgentConfig` model defining limits and system prompt; test verifying clean dependency injection.
-- [ ] **M3-T02: Core ReAct Reasoning Step Loop**
+- [x] **M3-T02: Core ReAct Reasoning Step Loop**
   - **Criteria**: Iterative loop invoking `llm.chat()`, dispatching tool execution when `tool_calls` are present, appending tool responses to conversation history, and exiting when a final text response is produced; unit tests verify single-turn and multi-turn tool loops.
 - [ ] **M3-T03: Loop Termination, Max Steps, and Timeout Guards**
   - **Criteria**: Enforce `MAX_STEPS` raising `MaxStepsExceeded` or setting `RunStatus.MAX_STEPS_EXCEEDED`; enforce total run timeout (`run_timeout_s`) transitioning to `RunStatus.TIMED_OUT`; unit tests verify both guardrails fire appropriately.

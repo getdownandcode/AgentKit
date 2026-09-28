@@ -15,6 +15,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M2-T02  | M2        | Scripted FakeLLMClient | `feat/fake-llm-client` | #8 | 2 | Done | Deterministic FIFO mock client with history tracking |
 | M2-T03  | M2        | Google Gemini SDK Adapter | `feat/gemini-adapter` | #9 | 2 | Done | GeminiClient with FunctionDeclaration & token metrics |
 | M3-T01  | M3        | Agent State Machine & Configuration | `feat/agent-state-machine` | #10 | 2 | Done | Agent class, AgentConfig, and RunResult models |
+| M3-T02  | M3        | Core ReAct Reasoning Step Loop | `feat/react-step-loop` | #11 | 2 | Done | Multi-step ReAct loop with tool invocation & answer exit |
 
 ---
 
@@ -83,3 +84,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #10
 - **Commits**: 2
 - **Notes**: Implemented `AgentConfig`, `RunResult`, and `Agent` class in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent.py`.
+
+### M3-T02: Core ReAct Reasoning Step Loop
+- **Status**: Done
+- **PR**: #11
+- **Commits**: 2
+- **Notes**: Implemented ReAct step loop with tool execution, token accumulation, trace hooks, and answer exit in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent_loop.py`.
