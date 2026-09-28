@@ -1,20 +1,18 @@
-"""Unit tests for StepTrace model, TraceSink interface, and InMemoryTraceSink."""
-
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from agentkit.core.agent import Agent, AgentConfig
+from agentkit.core.agent import Agent
 from agentkit.core.trace import InMemoryTraceSink, StepTrace, TraceSink
 from agentkit.core.types import RunStatus
-from agentkit.llm.base import LLMResponse, TokenUsage, ToolCall
+from agentkit.llm.base import LLMResponse, TokenUsage
 from agentkit.llm.fake import FakeLLMClient
-from agentkit.tools.models import ToolCall as ExecToolCall
+from agentkit.tools.models import ToolCall
 from agentkit.tools.registry import ToolRegistry, tool
 
 
 def test_step_trace_initialization() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     trace = StepTrace(
         run_id="run_123",
         step_no=1,
@@ -139,10 +137,10 @@ async def test_agent_continues_when_trace_sink_fails() -> None:
     )
 
     class BrokenTraceSink(TraceSink):
-        async def record(self, trace: StepTrace) -> None:
+        async def record(self, _trace: StepTrace) -> None:
             raise RuntimeError("Database connection lost in trace sink!")
 
-        async def get_traces(self, run_id: str) -> list[StepTrace]:
+        async def get_traces(self, _run_id: str) -> list[StepTrace]:
             return []
 
     broken_sink = BrokenTraceSink()
