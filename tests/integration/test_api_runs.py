@@ -1,5 +1,6 @@
 import uuid
-from typing import Any
+from collections.abc import AsyncIterator
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -8,19 +9,18 @@ from agentkit.api.deps import get_agent, get_memory_store
 from agentkit.api.main import create_app
 from agentkit.config import Settings
 from agentkit.core.agent import Agent, AgentConfig
-from agentkit.core.trace import StepTrace
-from agentkit.core.types import Role
+from agentkit.core.pg_trace import PostgresTraceSink
 from agentkit.db.models import Base
-from agentkit.llm.base import LLMResponse, Message
+from agentkit.llm.base import LLMResponse
 from agentkit.llm.fake import FakeLLMClient
-from agentkit.memory.base import InMemoryMemoryStore, RunRecord
+from agentkit.memory.base import InMemoryMemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
-from agentkit.tools.models import ToolCall, ToolResult
+from agentkit.tools.models import ToolCall
 from agentkit.tools.registry import ToolRegistry
 
 
 @pytest.fixture
-async def async_db():
+async def async_db() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -63,7 +63,9 @@ def test_runs_validation_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_and_query_run_lifecycle(async_db) -> None:
+async def test_create_and_query_run_lifecycle(
+    async_db: async_sessionmaker[AsyncSession],
+) -> None:
     settings = Settings(API_KEYS="secret_token")
     app = create_app(settings=settings)
     app.state.session_factory = async_db
@@ -72,32 +74,29 @@ async def test_create_and_query_run_lifecycle(async_db) -> None:
     # Setup fake agent
     registry = ToolRegistry()
 
-    @registry.tool(name="calc", description="calculator")
     def calc(expr: str) -> int:
-        return 42
+        return 42 if expr else 0
+
+    registry.register(calc, name="calc", description="calculator")
 
     fake_llm = FakeLLMClient(
         responses=[
             LLMResponse(
-                message=Message(
-                    role=Role.ASSISTANT,
-                    content="",
-                    tool_calls=[ToolCall(name="calc", args={"expr": "6*7"})],
-                )
+                tool_calls=[ToolCall(id="call_1", name="calc", arguments={"expr": "6*7"})],
             ),
             LLMResponse(
-                message=Message(
-                    role=Role.ASSISTANT,
-                    content="The result is 42.",
-                )
+                text="The result is 42.",
             ),
         ]
     )
+
+    trace_sink = PostgresTraceSink(async_db)
 
     agent = Agent(
         llm=fake_llm,
         registry=registry,
         memory=memory_store,
+        trace=trace_sink,
         config=AgentConfig(max_steps=5),
     )
 

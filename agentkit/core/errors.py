@@ -145,6 +145,14 @@ class ToolSecurityError(ToolError):
         super().__init__(tool_name, message, code="TOOL_SECURITY_ERROR")
 
 
+class RunNotFoundError(AgentKitError):
+    """Raised when a requested run is not found in the persistence store."""
+
+    def __init__(self, run_id: str | Any) -> None:
+        super().__init__(f"Run '{run_id}' not found.", code="RUN_NOT_FOUND")
+        self.run_id = str(run_id)
+
+
 # Aliases for convenience
 ToolNotFoundError = ToolNotFound
 LLMRateLimitError = RateLimitExceededError

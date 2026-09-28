@@ -11,12 +11,14 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from agentkit.api.routes import router as runs_router
 from agentkit.config import Settings, get_settings
 from agentkit.core.errors import (
     AgentKitError,
     AuthenticationError,
     LLMProviderError,
     LLMRateLimitError,
+    RunNotFoundError,
     RunTimeoutError,
     ToolNotFoundError,
 )
@@ -28,7 +30,7 @@ def map_agentkit_error_status(exc: AgentKitError) -> int:
     """Map domain AgentKitError subclasses to appropriate HTTP status codes."""
     if isinstance(exc, AuthenticationError):
         return 401
-    if isinstance(exc, ToolNotFoundError):
+    if isinstance(exc, (ToolNotFoundError, RunNotFoundError)):
         return 404
     if isinstance(exc, RunTimeoutError):
         return 504
@@ -122,6 +124,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             },
         )
+
+    app.include_router(runs_router)
 
     return app
 
