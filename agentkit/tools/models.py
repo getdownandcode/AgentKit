@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ToolResult(BaseModel):
@@ -58,12 +58,13 @@ class ToolResult(BaseModel):
 class ToolCall(BaseModel):
     """Represents a request from an LLM to invoke a registered tool."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     id: str = Field(description="Unique identifier for the tool call instance.")
     name: str = Field(description="Target tool name.")
     arguments: dict[str, Any] = Field(
         default_factory=dict,
+        validation_alias=AliasChoices("arguments", "args"),
         description="Parsed tool arguments.",
     )
 

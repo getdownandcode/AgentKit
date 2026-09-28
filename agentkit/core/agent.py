@@ -103,6 +103,27 @@ class Agent:
 
         with log_context(run_id=run_id):
             logger.info("Starting agent run for goal: %s", goal)
+            if self.memory is not None and hasattr(self.memory, "create_run"):
+                with contextlib.suppress(Exception):
+                    await self.memory.create_run(
+                        run_id=run_id,
+                        goal=goal,
+                        session_id=session_id,
+                    )
+
+            async def _finalize_and_return(result: RunResult) -> RunResult:
+                if self.memory is not None and hasattr(self.memory, "update_run"):
+                    with contextlib.suppress(Exception):
+                        await self.memory.update_run(
+                            run_id=result.run_id,
+                            status=result.status,
+                            final_answer=result.final_answer,
+                            failure_reason=result.failure_reason,
+                            total_input_tokens=result.total_input_tokens,
+                            total_output_tokens=result.total_output_tokens,
+                        )
+                return result
+
             messages: list[Message] = [
                 Message.system(self.config.system_prompt),
                 Message.user(goal),
@@ -155,11 +176,7 @@ class Agent:
                                         call.name,
                                         consecutive_duplicate_count,
                                     )
-                                    if raise_on_failure:
-                                        raise DuplicateToolCallLoopError(
-                                            call.name, consecutive_duplicate_count
-                                        )
-                                    return RunResult(
+                                    res = RunResult(
                                         run_id=run_id,
                                         session_id=session_id,
                                         goal=goal,
@@ -173,6 +190,12 @@ class Agent:
                                         total_output_tokens=total_output_tokens,
                                         duration_ms=duration_ms,
                                     )
+                                    await _finalize_and_return(res)
+                                    if raise_on_failure:
+                                        raise DuplicateToolCallLoopError(
+                                            call.name, consecutive_duplicate_count
+                                        )
+                                    return res
 
                                 logger.info(
                                     "Executing tool '%s' with args: %s", call.name, call.arguments
@@ -216,23 +239,23 @@ class Agent:
                             # Final natural language answer reached
                             duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
                             logger.info("Agent run succeeded in %d ms", duration_ms)
-                            return RunResult(
-                                run_id=run_id,
-                                session_id=session_id,
-                                goal=goal,
-                                status=RunStatus.SUCCEEDED,
-                                final_answer=response.text,
-                                steps_count=steps_count,
-                                total_input_tokens=total_input_tokens,
-                                total_output_tokens=total_output_tokens,
-                                duration_ms=duration_ms,
+                            return await _finalize_and_return(
+                                RunResult(
+                                    run_id=run_id,
+                                    session_id=session_id,
+                                    goal=goal,
+                                    status=RunStatus.SUCCEEDED,
+                                    final_answer=response.text,
+                                    steps_count=steps_count,
+                                    total_input_tokens=total_input_tokens,
+                                    total_output_tokens=total_output_tokens,
+                                    duration_ms=duration_ms,
+                                )
                             )
 
                     duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
                     logger.warning("Agent run exceeded max steps (%d)", self.config.max_steps)
-                    if raise_on_failure:
-                        raise MaxStepsExceeded(self.config.max_steps)
-                    return RunResult(
+                    res_max = RunResult(
                         run_id=run_id,
                         session_id=session_id,
                         goal=goal,
@@ -243,13 +266,15 @@ class Agent:
                         total_output_tokens=total_output_tokens,
                         duration_ms=duration_ms,
                     )
+                    await _finalize_and_return(res_max)
+                    if raise_on_failure:
+                        raise MaxStepsExceeded(self.config.max_steps)
+                    return res_max
 
             except TimeoutError as exc:
                 duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
                 logger.warning("Agent run timed out after %s seconds", self.config.run_timeout_s)
-                if raise_on_failure:
-                    raise RunTimeoutError(self.config.run_timeout_s) from exc
-                return RunResult(
+                res_to = RunResult(
                     run_id=run_id,
                     session_id=session_id,
                     goal=goal,
@@ -260,12 +285,14 @@ class Agent:
                     total_output_tokens=total_output_tokens,
                     duration_ms=duration_ms,
                 )
+                await _finalize_and_return(res_to)
+                if raise_on_failure:
+                    raise RunTimeoutError(self.config.run_timeout_s) from exc
+                return res_to
             except Exception as exc:
                 duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
                 logger.error("Agent run failed with error: %s", exc)
-                if raise_on_failure:
-                    raise
-                return RunResult(
+                res_err = RunResult(
                     run_id=run_id,
                     session_id=session_id,
                     goal=goal,
@@ -276,3 +303,7 @@ class Agent:
                     total_output_tokens=total_output_tokens,
                     duration_ms=duration_ms,
                 )
+                await _finalize_and_return(res_err)
+                if raise_on_failure:
+                    raise
+                return res_err
