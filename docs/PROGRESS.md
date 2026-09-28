@@ -30,6 +30,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M6-T02  | M6        | Async Redis Session Store | `feat/redis-memory-store` | #23 | 2 | Done | RedisMemoryStore, session key TTL, sliding window truncation |
 | M6-T03  | M6        | Database Models & Alembic Migrations | `feat/alembic-migrations` | #24 | 2 | Done | alembic.ini, env.py, 001_initial migration, upgrade/downgrade test |
 | M6-T04  | M6        | PostgreSQL Run & Step Repository | `feat/pg-memory-store` | #25 | 2 | Done | PostgresMemoryStore, run lifecycle, trace retrieval, session filters |
+| M7-T01  | M7        | FastAPI Application Core & Handlers | `feat/api-core-app` | #26 | 2 | Done | create_app factory, async lifespan, global error handlers for JSON specs |
 
 ---
 
@@ -188,6 +189,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #25
 - **Commits**: 2
 - **Notes**: Implemented `PostgresMemoryStore` in `agentkit/memory/pg_store.py` providing asynchronous run creation, status and metrics updating, single run retrieval, step trace querying ordered by step number, and session-filtered run listing. Unit tests with in-memory SQLite in `tests/unit/test_pg_store.py`.
+
+### M7-T01: FastAPI Application Core & Handlers
+- **Status**: Done
+- **PR**: #26
+- **Commits**: 2
+- **Notes**: Implemented `create_app` factory in `agentkit/api/main.py` with async lifespan context management for database engines and Redis connection pools, plus unified global exception handlers translating `AgentKitError`, `RequestValidationError`, `HTTPException`, and server exceptions into standard `{"error": {"code": "...", "message": "..."}}` responses. Unit tests in `tests/unit/test_api_core.py`.
+
 
 
 
