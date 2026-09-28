@@ -1,5 +1,11 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+
 import fakeredis.aioredis
 import pytest
+from redis.asyncio import Redis
 
 from agentkit.core.types import Role
 from agentkit.llm.base import Message
@@ -8,22 +14,26 @@ from agentkit.tools.models import ToolCall
 
 
 @pytest.fixture
-async def fake_redis():
+async def fake_redis() -> AsyncIterator[Redis[Any]]:
     """Create a clean in-memory fake async Redis client."""
-    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    client: Redis[Any] = fakeredis.aioredis.FakeRedis(decode_responses=True)
     yield client
-    await client.aclose()
+    aclose_fn = getattr(client, "aclose", None)
+    if callable(aclose_fn):
+        await aclose_fn()
+    else:
+        await client.close()
 
 
 @pytest.mark.asyncio
-async def test_redis_memory_store_get_empty_session(fake_redis) -> None:
+async def test_redis_memory_store_get_empty_session(fake_redis: Redis[Any]) -> None:
     store = RedisMemoryStore(client=fake_redis, ttl_s=3600)
     messages = await store.get_messages("non_existent_session")
     assert messages == []
 
 
 @pytest.mark.asyncio
-async def test_redis_memory_store_save_and_get(fake_redis) -> None:
+async def test_redis_memory_store_save_and_get(fake_redis: Redis[Any]) -> None:
     store = RedisMemoryStore(client=fake_redis, ttl_s=1800)
     session_id = "session_1"
 
@@ -66,7 +76,7 @@ async def test_redis_memory_store_save_and_get(fake_redis) -> None:
 
 
 @pytest.mark.asyncio
-async def test_redis_memory_store_clear_session(fake_redis) -> None:
+async def test_redis_memory_store_clear_session(fake_redis: Redis[Any]) -> None:
     store = RedisMemoryStore(client=fake_redis, ttl_s=3600)
     session_id = "session_to_clear"
 
@@ -80,7 +90,7 @@ async def test_redis_memory_store_clear_session(fake_redis) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sliding_window_truncation_with_system_prompt(fake_redis) -> None:
+async def test_sliding_window_truncation_with_system_prompt(fake_redis: Redis[Any]) -> None:
     # Set max_messages=3
     store = RedisMemoryStore(client=fake_redis, ttl_s=3600, max_messages=3)
     session_id = "session_trunc"
@@ -107,7 +117,7 @@ async def test_sliding_window_truncation_with_system_prompt(fake_redis) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sliding_window_truncation_without_system_prompt(fake_redis) -> None:
+async def test_sliding_window_truncation_without_system_prompt(fake_redis: Redis[Any]) -> None:
     # Set max_messages=2
     store = RedisMemoryStore(client=fake_redis, ttl_s=3600, max_messages=2)
     session_id = "session_no_sys"
