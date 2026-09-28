@@ -7,8 +7,9 @@ import pytest
 from agentkit.core.agent import Agent, AgentConfig
 from agentkit.core.errors import MaxStepsExceeded, RunTimeoutError
 from agentkit.core.types import RunStatus
-from agentkit.llm.base import LLMResponse, TokenUsage, ToolCall
+from agentkit.llm.base import LLMResponse, TokenUsage
 from agentkit.llm.fake import FakeLLMClient
+from agentkit.tools.models import ToolCall
 from agentkit.tools.registry import ToolRegistry, tool
 
 
@@ -142,3 +143,26 @@ async def test_run_timeout_raises_when_requested() -> None:
         await agent.run(goal="Test timeout raising", raise_on_failure=True)
 
     assert exc_info.value.code == "RUN_TIMED_OUT"
+
+
+@pytest.mark.asyncio
+async def test_agent_handles_unexpected_exception() -> None:
+    registry = ToolRegistry()
+    # FakeLLMClient with empty queue raises RuntimeError
+    llm = FakeLLMClient(responses=[])
+
+    agent = Agent(llm=llm, registry=registry)
+    result = await agent.run(goal="Handle crash")
+
+    assert result.status == RunStatus.FAILED
+    assert "response queue exhausted" in (result.failure_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_agent_raises_unexpected_exception_when_flag_enabled() -> None:
+    registry = ToolRegistry()
+    llm = FakeLLMClient(responses=[])
+
+    agent = Agent(llm=llm, registry=registry)
+    with pytest.raises(RuntimeError):
+        await agent.run(goal="Handle crash", raise_on_failure=True)

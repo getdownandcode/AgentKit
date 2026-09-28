@@ -30,7 +30,7 @@ class MaxStepsExceeded(AgentKitError):
 class RunTimeoutError(AgentKitError):
     """Raised when an agent run exceeds its overall timeout duration."""
 
-    def __init__(self, timeout_s: int) -> None:
+    def __init__(self, timeout_s: int | float) -> None:
         super().__init__(
             f"Agent run exceeded maximum execution timeout of {timeout_s} seconds.",
             code="RUN_TIMED_OUT",
