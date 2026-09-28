@@ -1,9 +1,5 @@
 """Unit tests for tool schema generation from callable inspection."""
 
-from typing import Optional
-
-import pytest
-
 from agentkit.tools.schema import create_tool_schema
 
 
@@ -18,11 +14,11 @@ def dummy_calculator(expression: str) -> str:
 
 def dummy_search(query: str, limit: int = 5, verbose: bool = False) -> str:
     """Search for relevant documents."""
-    return query
+    return f"{query}:{limit}:{verbose}"
 
 
-def dummy_no_docstring(x: float, y: Optional[str] = None) -> float:
-    return x
+def dummy_no_docstring(x: float, y: str | None = None) -> float:
+    return x if y is None else x + len(y)
 
 
 def test_create_tool_schema_basic() -> None:
