@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentkit.core.errors import DuplicateToolCallLoopError, MaxStepsExceeded, RunTimeoutError
+from agentkit.core.trace import StepTrace, TraceSink
 from agentkit.core.types import RunStatus
 from agentkit.llm.base import LLMClient, Message
 from agentkit.tools.registry import ToolRegistry
@@ -77,7 +78,7 @@ class Agent:
         llm: LLMClient,
         registry: ToolRegistry,
         memory: Any = None,
-        trace: Any = None,
+        trace: TraceSink | None = None,
         config: AgentConfig | None = None,
     ) -> None:
         self.llm = llm
@@ -173,7 +174,7 @@ class Agent:
 
                             if self.trace is not None and hasattr(self.trace, "record"):
                                 with contextlib.suppress(Exception):
-                                    await self.trace.record(
+                                    trace_record = StepTrace(
                                         run_id=run_id,
                                         step_no=steps_count,
                                         tool_name=call.name,
@@ -184,6 +185,7 @@ class Agent:
                                         input_tokens=response.usage.input_tokens,
                                         output_tokens=response.usage.output_tokens,
                                     )
+                                    await self.trace.record(trace_record)
                     else:
                         # Final natural language answer reached
                         duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
