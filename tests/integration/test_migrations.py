@@ -1,9 +1,8 @@
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-import pytest
 
 
 def test_alembic_migrations_lifecycle(tmp_path: Path) -> None:
@@ -32,12 +31,34 @@ def test_alembic_migrations_lifecycle(tmp_path: Path) -> None:
     # Check columns in runs
     cursor.execute("PRAGMA table_info(runs);")
     run_cols = {row[1] for row in cursor.fetchall()}
-    assert {"id", "session_id", "goal", "status", "final_answer", "failure_reason", "total_input_tokens", "total_output_tokens", "created_at"}.issubset(run_cols)
+    assert {
+        "id",
+        "session_id",
+        "goal",
+        "status",
+        "final_answer",
+        "failure_reason",
+        "total_input_tokens",
+        "total_output_tokens",
+        "created_at",
+    }.issubset(run_cols)
 
     # Check columns in steps
     cursor.execute("PRAGMA table_info(steps);")
     step_cols = {row[1] for row in cursor.fetchall()}
-    assert {"id", "run_id", "step_no", "tool_name", "args", "result", "error", "latency_ms", "input_tokens", "output_tokens", "created_at"}.issubset(step_cols)
+    assert {
+        "id",
+        "run_id",
+        "step_no",
+        "tool_name",
+        "args",
+        "result",
+        "error",
+        "latency_ms",
+        "input_tokens",
+        "output_tokens",
+        "created_at",
+    }.issubset(step_cols)
 
     # Check index on steps(run_id, step_no)
     cursor.execute("PRAGMA index_list(steps);")
