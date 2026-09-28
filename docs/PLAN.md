@@ -63,12 +63,12 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 5: Tracing & Structured Telemetry
-- [ ] **M5-T01: `TraceSink` Protocol & Contextual Structured Logger (`agentkit/core/trace.py`)**
-  - **Criteria**: Define abstract `TraceSink` interface (`record(step, call, result, usage)`); structured logger attaching `run_id` and `step_no` context to all log entries; unit tests for log formatting.
-- [ ] **M5-T02: PostgreSQL Trace Sink (`agentkit/core/pg_trace.py`)**
-  - **Criteria**: Async persistence of step records (`run_id`, `step_no`, `tool_name`, `args`, `result`, `latency_ms`, `input_tokens`, `output_tokens`) into `steps` table; unit tests with mock DB session.
-- [ ] **M5-T03: Fail-Safe Non-Blocking Trace Wrapper**
-  - **Criteria**: Wrapping trace write operations in exception handlers so that any trace sink failure is logged but never disrupts or terminates the core agent reasoning loop; unit tests simulating trace write errors.
+- [x] **M5-T01: `TraceSink` Protocol & `InMemoryTraceSink` (`agentkit/core/trace.py`)**
+  - **Criteria**: Define abstract `TraceSink` interface (`record(step, call, result, usage)`), `StepTrace` frozen model, `InMemoryTraceSink`, and fail-safe non-blocking trace recording in agent loop; unit tests for trace recording and error tolerance.
+- [ ] **M5-T02: Contextual Structured JSON Logger (`agentkit/core/log.py`)**
+  - **Criteria**: Structured JSON log formatter attaching `run_id` and `step_no` context via contextvars to all log entries; logger configuration helper; integration into agent loop; unit tests for log formatting and context propagation.
+- [ ] **M5-T03: PostgreSQL Trace Sink (`agentkit/core/pg_trace.py`)**
+  - **Criteria**: Async persistence of step records (`run_id`, `step_no`, `tool_name`, `args`, `result`, `latency_ms`, `input_tokens`, `output_tokens`) into database session; unit tests with mock DB session or in-memory async SQLite.
 
 ---
 

@@ -23,6 +23,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M4-T03  | M4        | SSRF-Protected HTTP Fetch Tool | `feat/ssrf-http-fetch-tool` | #16 | 2 | Done | DNS & IP SSRF validation, private/metadata blocking, safe redirect |
 | M4-T04  | M4        | Read-Only SQL Tool | `feat/readonly-sql-tool` | #17 | 2 | Done | Strict SELECT AST validation, DDL/DML rejection, Markdown formatting |
 | M4-T05  | M4        | Web Search Tool Adapter | `feat/web-search-tool` | #18 | 2 | Done | Tavily search integration, error handling for missing key, formatted snippets |
+| M5-T01  | M5        | TraceSink Protocol & InMemoryTraceSink | `feat/trace-sink-base` | #19 | 2 | Done | StepTrace model, TraceSink ABC, InMemoryTraceSink, Agent.run() trace wiring |
 
 ---
 
@@ -139,6 +140,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #18
 - **Commits**: 2
 - **Notes**: Implemented `web_search` tool and `search_web` in `agentkit/tools/builtin/web_search.py` connecting to Tavily search API, limiting results, handling missing API keys with informative errors, and formatting output as numbered snippets. Unit tests in `tests/unit/test_tool_web_search.py`.
+
+### M5-T01: TraceSink Protocol & InMemoryTraceSink
+- **Status**: Done
+- **PR**: #19
+- **Commits**: 2
+- **Notes**: Implemented `StepTrace` frozen Pydantic model and `TraceSink` abstract interface in `agentkit/core/trace.py`, along with `InMemoryTraceSink` and execution trace hook integration in `Agent.run()`. Unit tests in `tests/unit/test_trace.py`.
 
 
 
