@@ -91,7 +91,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Fast validation of `X-API-Key` header against comma-separated `API_KEYS` setting; returns 401 Unauthorized on invalid/missing key; bypasses `/health`; unit tests for auth verification.
 - [x] **M7-T03: Run Management Routes (`agentkit/api/routes.py` - `/runs`)**
   - **Criteria**: `POST /runs` (validates request, executes agent, returns run ID and answer), `GET /runs/{run_id}` (retrieves summary), `GET /runs/{run_id}/trace` (retrieves step history); request/response Pydantic models in `schemas.py`; integration tests.
-- [ ] **M7-T04: Discovery & Health Routes (`/tools`, `/health`)**
+- [x] **M7-T04: Discovery & Health Routes (`/tools`, `/health`)**
   - **Criteria**: `GET /tools` returning list of registered tools and schemas; `GET /health` verifying live connectivity to PostgreSQL and Redis; tests verifying 200 OK and health response structure.
 
 ---

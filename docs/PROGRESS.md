@@ -208,6 +208,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `POST /runs`, `GET /runs/{run_id}`, and `GET /runs/{run_id}/trace` in `agentkit/api/routes.py`. Defined Pydantic boundary models in `agentkit/api/schemas.py`. Created dependency injection providers in `agentkit/api/deps.py` and database session utilities in `agentkit/db/session.py`. Integrated automatic run persistence across completion and failure paths in `Agent.run`. Added `RunNotFoundError` mapped to 404. Integration tests in `tests/integration/test_api_runs.py`.
 
+### M7-T04: Discovery & Health Routes
+- **Status**: Done
+- **PR**: #29
+- **Commits**: 2
+- **Notes**: Implemented `GET /tools` returning list of registered tools with introspected JSON schemas (protected by `X-API-Key`). Implemented `GET /health` with live `SELECT 1` database query and Redis client ping (publicly accessible). Added `discovery_router` in `agentkit/api/routes.py` and wired into `create_app`. Integration tests in `tests/integration/test_api_health.py`.
+
 
 
 
