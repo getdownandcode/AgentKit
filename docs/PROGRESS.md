@@ -14,6 +14,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M2-T01  | M2        | Abstract LLMClient Interface | `feat/llm-client-base` | #7 | 2 | Done | LLMClient ABC, Message, TokenUsage, LLMResponse |
 | M2-T02  | M2        | Scripted FakeLLMClient | `feat/fake-llm-client` | #8 | 2 | Done | Deterministic FIFO mock client with history tracking |
 | M2-T03  | M2        | Google Gemini SDK Adapter | `feat/gemini-adapter` | #9 | 2 | Done | GeminiClient with FunctionDeclaration & token metrics |
+| M3-T01  | M3        | Agent State Machine & Configuration | `feat/agent-state-machine` | #10 | 2 | Done | Agent class, AgentConfig, and RunResult models |
 
 ---
 
@@ -76,3 +77,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #9
 - **Commits**: 2
 - **Notes**: Implemented `GeminiClient` in `agentkit/llm/gemini.py` with google-genai SDK, FunctionDeclaration translation, candidate parsing, and usage accounting. Unit tests in `tests/unit/test_gemini_adapter.py`.
+
+### M3-T01: Agent State Machine & Configuration
+- **Status**: Done
+- **PR**: #10
+- **Commits**: 2
+- **Notes**: Implemented `AgentConfig`, `RunResult`, and `Agent` class in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent.py`.
