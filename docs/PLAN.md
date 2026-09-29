@@ -105,7 +105,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 9: Reliability & Rate Limiting
-- [ ] **M9-T01: LLM Exponential Backoff Retry with Jitter (`agentkit/llm/retry.py`)**
+- [x] **M9-T01: LLM Exponential Backoff Retry with Jitter (`agentkit/llm/retry.py`)**
   - **Criteria**: Decorator/wrapper handling transient errors (HTTP 429, 500, 503, timeouts); exponential backoff with random jitter; max retry cap; fails immediately on 400 Bad Request; unit tests validating retry counts and backoff intervals.
 - [ ] **M9-T02: Redis-Backed Sliding Window Rate Limiter (`agentkit/api/ratelimit.py`)**
   - **Criteria**: Rate limiter checking API key request volume in Redis (e.g. 30 req/min); returns HTTP 429 with `Retry-After` header when limit exceeded; unit tests validating rate limit tripping and window reset.

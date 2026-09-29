@@ -226,16 +226,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `create_llm_client` and `create_llm_client_from_settings` in `agentkit/llm/factory.py` dynamically provisioning `GeminiClient`, `OpenAIClient`, or `FakeLLMClient` with case normalization and provider validation. Integrated into FastAPI `get_llm_client` dependency in `agentkit/api/deps.py`. Unit tests in `tests/unit/test_llm_factory.py`.
 
-
-
-
-
-
-
-
-
-
-
-
-
+### M9-T01: LLM Exponential Backoff Retry with Jitter
+- **Status**: Done
+- **PR**: #32
+- **Commits**: 2
+- **Notes**: Implemented async exponential backoff retry decorator and `RetryingLLMClient` wrapper in `agentkit/llm/retry.py`. Accurately distinguishes transient errors (`RateLimitExceededError`, `TimeoutError`, `ConnectionError`, `LLMProviderError` for 429 and 5xx) from non-transient errors (4xx, `AuthenticationError`, `ValueError`) which fail immediately. Unit tests in `tests/unit/test_llm_retry.py`.
 
