@@ -7,6 +7,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agentkit.core.agent import Agent, AgentConfig
+from agentkit.core.errors import RunTimeoutError
+from agentkit.core.pg_trace import PostgresTraceSink
 from agentkit.core.types import RunStatus
 from agentkit.db.models import Base
 from agentkit.llm.base import LLMResponse, Message
@@ -117,5 +119,89 @@ async def test_hanging_run_triggers_global_timeout_and_persists_status() -> None
     assert stored_run.status == RunStatus.TIMED_OUT
     assert stored_run.failure_reason is not None
     assert "timed out" in stored_run.failure_reason.lower()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hanging_run_raises_when_raise_on_failure_true() -> None:
+    """Verify that run_timeout_s raises RunTimeoutError when raise_on_failure=True."""
+    memory_store = InMemoryMemoryStore()
+
+    class HangingLLM(FakeLLMClient):
+        async def chat(
+            self,
+            messages: list[Message],
+            tools: list[Any] | None = None,
+        ) -> LLMResponse:
+            _ = (messages, tools)
+            await asyncio.sleep(0.3)
+            return LLMResponse(text="Delayed")
+
+    config = AgentConfig(run_timeout_s=0.05)
+    agent = Agent(
+        llm=HangingLLM(),
+        registry=ToolRegistry(),
+        config=config,
+        memory=memory_store,
+    )
+
+    with pytest.raises(RunTimeoutError) as exc_info:
+        await agent.run(goal="Fail on timeout", raise_on_failure=True)
+
+    assert exc_info.value.timeout_s == 0.05
+
+    # Memory store still has the run recorded as TIMED_OUT
+    runs = list(memory_store._runs.values())
+    assert len(runs) == 1
+    assert runs[0].status == RunStatus.TIMED_OUT
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_persisted_in_trace_sink() -> None:
+    """Verify that tool timeout failure details are recorded in the trace sink."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    trace_sink = PostgresTraceSink(session_factory)
+    memory_store = PostgresMemoryStore(session_factory)
+
+    registry = ToolRegistry()
+
+    @tool(name="blocking_step", description="Step that hangs.")
+    async def blocking_step() -> ToolResult:
+        await asyncio.sleep(0.4)
+        return ToolResult(output="done", ok=True)
+
+    registry.register(blocking_step)
+
+    fake_llm = FakeLLMClient(
+        responses=[
+            LLMResponse(
+                text="",
+                tool_calls=[ToolCall(id="call_block_1", name="blocking_step", arguments={})],
+            ),
+            LLMResponse(text="Handled tool timeout gracefully."),
+        ]
+    )
+
+    config = AgentConfig(tool_timeout_s=0.05, run_timeout_s=2.0)
+    agent = Agent(
+        llm=fake_llm,
+        registry=registry,
+        config=config,
+        memory=memory_store,
+        trace=trace_sink,
+    )
+
+    res = await agent.run(goal="Trace timeout test")
+    assert res.status == RunStatus.SUCCEEDED
+
+    steps = await memory_store.get_run_trace(res.run_id)
+    assert len(steps) == 1
+    assert steps[0].tool_name == "blocking_step"
+    assert steps[0].error is not None
+    assert "timed out" in steps[0].error.lower()
 
     await engine.dispose()
