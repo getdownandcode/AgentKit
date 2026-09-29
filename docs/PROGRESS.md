@@ -214,6 +214,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `GET /tools` returning list of registered tools with introspected JSON schemas (protected by `X-API-Key`). Implemented `GET /health` with live `SELECT 1` database query and Redis client ping (publicly accessible). Added `discovery_router` in `agentkit/api/routes.py` and wired into `create_app`. Integration tests in `tests/integration/test_api_health.py`.
 
+### M8-T01: OpenAI SDK Adapter
+- **Status**: Done
+- **PR**: #30
+- **Commits**: 2
+- **Notes**: Implemented `OpenAIClient` adapter in `agentkit/llm/openai.py` using official `openai` SDK. Supports message translation, function schema mapping, tool call argument parsing, token usage extraction, and domain exception mapping (`AuthenticationError`, `RateLimitExceededError`, `LLMProviderError`). Unit tests in `tests/unit/test_llm_openai.py`.
+
 
 
 
