@@ -170,3 +170,157 @@ def currency_converter(amount: float, from_curr: str, to_curr: str) -> float:
 schema = default_registry.get("currency_converter").schema
 print(schema.parameters)
 ```
+
+Tools can be synchronous or asynchronous (`async def`), and can be attached to custom scoped registries:
+```python
+from agentkit.tools.registry import ToolRegistry
+
+isolated_registry = ToolRegistry()
+isolated_registry.register(currency_converter)
+```
+
+---
+
+## Provider Extension Guide
+
+Adding a new LLM provider (such as Anthropic Claude, Mistral, or a local vLLM endpoint) is straightforward. Simply implement the `LLMClient` abstract interface:
+
+```python
+from collections.abc import Sequence
+from agentkit.llm.base import LLMClient, LLMResponse, Message, TokenUsage
+from agentkit.tools.models import ToolSchema
+
+
+class AnthropicClient(LLMClient):
+    """Custom Anthropic Claude adapter for AgentKit."""
+
+    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022") -> None:
+        self.api_key = api_key
+        self.model = model
+
+    async def chat(
+        self,
+        messages: Sequence[Message],
+        tools: Sequence[ToolSchema] | None = None,
+        system_prompt: str | None = None,
+    ) -> LLMResponse:
+        # 1. Translate neutral AgentKit Message sequence to Anthropic format
+        # 2. Translate neutral ToolSchema to Anthropic tool definitions
+        # 3. Call client API asynchronously
+        # 4. Return neutral LLMResponse(text=..., tool_calls=[...], usage=...)
+        ...
+```
+
+Register your client in `agentkit/llm/factory.py`:
+```python
+# In agentkit/llm/factory.py
+if normalized_provider == "anthropic":
+    return AnthropicClient(api_key=api_key or settings.ANTHROPIC_API_KEY, model=model)
+```
+
+---
+
+## Sample Trace Output
+
+Every reasoning step in AgentKit is captured as a structured `StepTrace` and recorded to the active `TraceSink` (such as `PostgresTraceSink` or `InMemoryTraceSink`):
+
+```json
+{
+  "run_id": "8e3b52d4-1a93-4a1e-8e81-cf1b41db61e8",
+  "step_number": 2,
+  "thought": "SQL query returned total revenue of $3,200.00. Now calculating 8.5% sales tax.",
+  "tool_calls": [
+    {
+      "id": "call_calc_4981",
+      "name": "calculator",
+      "arguments": {
+        "expression": "3200 * 1.085"
+      }
+    }
+  ],
+  "tool_results": [
+    {
+      "tool_call_id": "call_calc_4981",
+      "tool_name": "calculator",
+      "ok": true,
+      "output": "3472.0",
+      "error": null,
+      "duration_ms": 1
+    }
+  ],
+  "input_tokens": 420,
+  "output_tokens": 45,
+  "step_duration_ms": 380,
+  "timestamp": "2026-09-29T23:26:11.993000Z"
+}
+```
+
+View run traces programmatically via REST API:
+```bash
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8000/runs/{run_id}/trace | jq .
+```
+
+---
+
+## Architectural Decisions (ADR Summary)
+
+Key architectural trade-offs are documented in [docs/DECISIONS.md](docs/DECISIONS.md):
+
+- **ADR-001: Framework-less Agent Runtime**: Built directly on Python standard libraries and async primitives to eliminate framework bloat, prevent hidden prompt modifications, and allow exact step debugging.
+- **ADR-002: Neutral LLM Adapter Layer**: Pluggable `LLMClient` protocol ensures that changing model providers requires zero changes to the core reasoning loop.
+- **ADR-003: Tiered Dual-Store Persistence**:
+  - Redis manages ephemeral conversation sliding windows with automatic TTL expiration and rate limiting.
+  - PostgreSQL retains permanent, queryable execution audits and performance metrics.
+- **ADR-004: Declarative Tool Introspection**: Pydantic v2 runtime introspection automatically converts native Python type hints into JSON Schema and validates tool arguments before execution.
+
+---
+
+## Production AWS Deployment
+
+AgentKit is designed to run reliably as a single-node containerized deployment on AWS EC2 behind a TLS reverse proxy (Caddy or Nginx) with automated database backups to S3.
+
+Complete step-by-step instructions, including security group rules, systemd service daemon configuration, and AWS SSM secret retrieval, are available in the [AWS Deployment Guide](docs/DEPLOY.md).
+
+---
+
+## Testing & Quality Assurance
+
+AgentKit enforces strict code quality and comprehensive test coverage across all layers:
+
+```bash
+# Run the complete test suite
+pytest -v
+
+# Run with test coverage report (enforcing >=85% threshold)
+pytest --cov=agentkit --cov-report=term-missing --cov-fail-under=85
+
+# Run Ruff linter and formatter check
+ruff check .
+ruff format --check .
+
+# Run Mypy strict type-checker
+mypy agentkit tests examples
+```
+
+All pull requests trigger the automated GitHub Actions CI matrix running on Python 3.11 and 3.12 with live PostgreSQL 16 and Redis 7 service containers.
+
+---
+
+## Limitations & Future Roadmap
+
+### Current Limitations
+- **Sequential Tool Execution**: In the current ReAct loop, multiple tool calls in a single turn are executed sequentially rather than in parallel.
+- **Single-Node API**: Rate limiting and session caching use a single Redis instance; distributed Redis cluster configurations are not yet automated.
+- **Synchronous Responses**: The `/runs` REST endpoint returns when the full run completes; Server-Sent Events (SSE) streaming is not yet enabled.
+
+### Future Roadmap
+- [ ] **Parallel Tool Execution**: Dispatch independent tool calls concurrently using `asyncio.gather()`.
+- [ ] **Streaming SSE Token Protocol**: Real-time streaming of thoughts, tool invocations, and token chunks over Server-Sent Events.
+- [ ] **Multi-Agent Orchestration**: Hierarchical supervisor-worker agent delegation without external frameworks.
+- [ ] **Human-in-the-Loop Interrupts**: Pausing execution for human approval before invoking sensitive tools (e.g., destructive actions or payment APIs).
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
