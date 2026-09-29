@@ -232,3 +232,10 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented async exponential backoff retry decorator and `RetryingLLMClient` wrapper in `agentkit/llm/retry.py`. Accurately distinguishes transient errors (`RateLimitExceededError`, `TimeoutError`, `ConnectionError`, `LLMProviderError` for 429 and 5xx) from non-transient errors (4xx, `AuthenticationError`, `ValueError`) which fail immediately. Unit tests in `tests/unit/test_llm_retry.py`.
 
+### M9-T02: Redis-Backed Sliding Window Rate Limiter
+- **Status**: Done
+- **PR**: #33
+- **Commits**: 2
+- **Notes**: Implemented sliding window `RateLimiter` dependency in `agentkit/api/ratelimit.py` backed by Redis Sorted Sets (ZSET) with microsecond precision and an in-memory fallback. Returns HTTP 429 with computed `Retry-After` header when limit is exceeded. Wired into `/runs` and `/tools` endpoints. Unit tests in `tests/unit/test_api_ratelimit.py`.
+
+
