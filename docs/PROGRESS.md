@@ -244,5 +244,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented end-to-end integration tests in `tests/integration/test_timeouts.py` verifying that hanging tools exceeding `tool_timeout_s` fail gracefully without aborting the agent, allowing the LLM to recover. Verified that hanging runs trigger `RunStatus.TIMED_OUT` with proper database persistence, that `raise_on_failure=True` raises `RunTimeoutError`, and that tool timeouts are recorded in `PostgresTraceSink`.
 
+### M10-T01: Tool Failure Self-Correction Integration Test
+- **Status**: Done
+- **PR**: #35
+- **Commits**: 2
+- **Notes**: Implemented integration tests in `tests/integration/test_recovery.py` verifying that when a tool call fails with a computational error (calculator division by zero) or a file system error (sandboxed file not found), the error message is preserved in the conversation history as a tool response turn and the model successfully self-corrects its arguments on subsequent turns.
+
+
 
 
