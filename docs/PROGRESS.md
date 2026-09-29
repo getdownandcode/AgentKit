@@ -256,6 +256,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented integration tests in `tests/integration/test_injection.py` verifying that prompt injection attack payloads in tool outputs and error messages are strictly quarantined within `Role.TOOL` message turns and cannot overwrite system instructions or hijack the agent's behavior. Updated `agentkit/tools/executor.py` to handle direct `ToolResult` returns with `model_copy`.
 
+### M10-T03: Comprehensive Built-in Tools Security Suite
+- **Status**: Done
+- **PR**: #37
+- **Commits**: 2
+- **Notes**: Implemented exhaustive unit security test suite in `tests/unit/test_security_tools.py` covering AST evasion (blocking `eval`, `exec`, `open`, `__import__`, subclasses, lambda, comprehensions), SQL injection defenses (blocking DDL, DML, multi-statement queries, comments, PRAGMA/VACUUM), path traversal and symlink escapes in sandboxed file reader, and SSRF defenses (blocking loopbacks, RFC 1918 subnets, cloud metadata endpoints, non-HTTP schemes).
+
+
 
 
 
