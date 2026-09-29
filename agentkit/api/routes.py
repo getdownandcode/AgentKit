@@ -12,6 +12,7 @@ from agentkit.api.deps import (
     get_tool_registry,
     get_trace_sink,
 )
+from agentkit.api.ratelimit import rate_limit
 from agentkit.api.schemas import (
     HealthCheckResponse,
     RunCreateRequest,
@@ -30,7 +31,11 @@ from agentkit.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-runs_router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(verify_api_key)])
+runs_router = APIRouter(
+    prefix="/runs",
+    tags=["runs"],
+    dependencies=[Depends(verify_api_key), Depends(rate_limit)],
+)
 router = runs_router  # alias for backwards compatibility
 discovery_router = APIRouter(tags=["discovery"])
 
@@ -191,7 +196,7 @@ async def health_check(request: Request) -> JSONResponse:
 @discovery_router.get(
     "/tools",
     response_model=ToolsListResponse,
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(rate_limit)],
 )
 async def list_tools(
     tool_registry: ToolRegistry = Depends(get_tool_registry),
