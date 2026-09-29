@@ -135,7 +135,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 12: Documentation, Demo & Deployment Guide
-- [ ] **M12-T01: Demo Database Seed & Multi-Tool End-to-End Demo (`scripts/seed_demo_db.sql`, `examples/demo.py`)**
+- [x] **M12-T01: Demo Database Seed & Multi-Tool End-to-End Demo (`scripts/seed_demo_db.sql`, `examples/demo.py`)**
   - **Criteria**: SQL script seeding demo `orders` and `products` tables; Python script demonstrating end-to-end multi-tool problem solving (SQL query followed by calculator evaluation); verified running against local stack.
 - [ ] **M12-T02: AWS Deployment Guide (`docs/DEPLOY.md`)**
   - **Criteria**: Step-by-step documentation for deploying AgentKit on a single AWS EC2 instance using Docker Compose, including security groups, systemd service configuration, environment secrets management, and SSL termination via Caddy/Nginx.

@@ -281,6 +281,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Created `.github/workflows/ci.yml` featuring two decoupled jobs with concurrency cancellation. `lint` runs on Python 3.12 executing `ruff check`, `ruff format --check`, and `mypy agentkit tests`. `test` runs across a Python matrix (`3.11`, `3.12`) with `postgres:16-alpine` and `redis:7-alpine` service containers with integrated healthchecks, runs database migrations via `alembic upgrade head`, and verifies code coverage with `pytest --cov=agentkit --cov-fail-under=85` and XML artifact uploads.
 
+### M12-T01: Demo Database Seed & Multi-Tool End-to-End Demo
+- **Status**: Done
+- **PR**: #41
+- **Commits**: 2
+- **Notes**: Implemented `scripts/seed_demo_db.sql` populating `products` and `orders` tables with ANSI-standard SQL. Created `examples/demo.py` showcasing an autonomous agent solving a multi-step analytical problem by querying the database using `sql_readonly` and calculating revenue with sales tax via `calculator`. Supported deterministic offline execution using `FakeLLMClient` alongside live providers. Added integration tests in `tests/integration/test_demo.py`.
+
+
 
 
 
