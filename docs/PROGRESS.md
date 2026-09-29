@@ -238,4 +238,11 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented sliding window `RateLimiter` dependency in `agentkit/api/ratelimit.py` backed by Redis Sorted Sets (ZSET) with microsecond precision and an in-memory fallback. Returns HTTP 429 with computed `Retry-After` header when limit is exceeded. Wired into `/runs` and `/tools` endpoints. Unit tests in `tests/unit/test_api_ratelimit.py`.
 
+### M9-T03: Step and Run Timeout Verification
+- **Status**: Done
+- **PR**: #34
+- **Commits**: 2
+- **Notes**: Implemented end-to-end integration tests in `tests/integration/test_timeouts.py` verifying that hanging tools exceeding `tool_timeout_s` fail gracefully without aborting the agent, allowing the LLM to recover. Verified that hanging runs trigger `RunStatus.TIMED_OUT` with proper database persistence, that `raise_on_failure=True` raises `RunTimeoutError`, and that tool timeouts are recorded in `PostgresTraceSink`.
+
+
 
