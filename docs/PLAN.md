@@ -99,7 +99,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ## Milestone 8: Second LLM Adapter (OpenAI)
 - [x] **M8-T01: OpenAI SDK Adapter (`agentkit/llm/openai.py`)**
   - **Criteria**: `OpenAIClient` implementation using official `openai` SDK; translates neutral tools to OpenAI `tools` JSON schema; translates messages to OpenAI format; extracts tool calls and token usage; unit tests with mock OpenAI client.
-- [ ] **M8-T02: Provider Factory (`agentkit/llm/factory.py`)**
+- [x] **M8-T02: Provider Factory (`agentkit/llm/factory.py`)**
   - **Criteria**: Factory creating `LLMClient` instances based on `LLM_PROVIDER` (`gemini`, `openai`, `fake`); unit tests verifying provider instantiations and unknown-provider validation error.
 
 ---

@@ -220,6 +220,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `OpenAIClient` adapter in `agentkit/llm/openai.py` using official `openai` SDK. Supports message translation, function schema mapping, tool call argument parsing, token usage extraction, and domain exception mapping (`AuthenticationError`, `RateLimitExceededError`, `LLMProviderError`). Unit tests in `tests/unit/test_llm_openai.py`.
 
+### M8-T02: Provider Factory
+- **Status**: Done
+- **PR**: #31
+- **Commits**: 2
+- **Notes**: Implemented `create_llm_client` and `create_llm_client_from_settings` in `agentkit/llm/factory.py` dynamically provisioning `GeminiClient`, `OpenAIClient`, or `FakeLLMClient` with case normalization and provider validation. Integrated into FastAPI `get_llm_client` dependency in `agentkit/api/deps.py`. Unit tests in `tests/unit/test_llm_factory.py`.
+
 
 
 
