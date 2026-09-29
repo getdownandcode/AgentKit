@@ -275,6 +275,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Created production `docker-compose.yml` declaring `postgres` (PostgreSQL 16 Alpine), `redis` (Redis 7 Alpine), and `api` services with volume persistence, networks, resource limits, healthchecks (`pg_isready`, `redis-cli ping`, `curl /health`), dependency conditions (`condition: service_healthy`), automated Alembic database migrations on boot (`alembic upgrade head && uvicorn ...`), and updated `.env.example` with compose networking defaults. Verified compose syntax with `docker compose config`.
 
+### M11-T03: GitHub Actions CI Pipeline
+- **Status**: Done
+- **PR**: #40
+- **Commits**: 2
+- **Notes**: Created `.github/workflows/ci.yml` featuring two decoupled jobs with concurrency cancellation. `lint` runs on Python 3.12 executing `ruff check`, `ruff format --check`, and `mypy agentkit tests`. `test` runs across a Python matrix (`3.11`, `3.12`) with `postgres:16-alpine` and `redis:7-alpine` service containers with integrated healthchecks, runs database migrations via `alembic upgrade head`, and verifies code coverage with `pytest --cov=agentkit --cov-fail-under=85` and XML artifact uploads.
+
+
 
 
 
