@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentkit.core.agent import Agent, AgentConfig
@@ -7,7 +9,7 @@ from agentkit.core.types import RunStatus
 from agentkit.llm.base import LLMResponse
 from agentkit.llm.fake import FakeLLMClient
 from agentkit.tools.builtin.calculator import calculator
-from agentkit.tools.models import ToolCall
+from agentkit.tools.models import ToolCall, ToolResult
 from agentkit.tools.registry import ToolRegistry
 
 
@@ -70,3 +72,72 @@ async def test_agent_self_corrects_after_tool_failure() -> None:
         or "division by zero" in tool_turns[0].content.lower()
     )
     assert "50" in tool_turns[1].content
+
+
+@pytest.mark.asyncio
+async def test_agent_recovers_from_file_not_found(tmp_path: Path) -> None:
+    """Verify that an agent recovers when reading a non-existent file by retrying with the valid path."""
+    sandbox_dir = tmp_path / "sandbox"
+    sandbox_dir.mkdir()
+    valid_file = sandbox_dir / "target.txt"
+    valid_file.write_text("Hello AgentKit!", encoding="utf-8")
+
+    registry = ToolRegistry()
+
+    def safe_read(file_path: str) -> ToolResult:
+        from agentkit.tools.builtin.read_file import read_sandboxed_file
+
+        try:
+            content = read_sandboxed_file(file_path=file_path, base_dir=sandbox_dir)
+            return ToolResult(output=content, ok=True)
+        except Exception as exc:
+            return ToolResult(output="", ok=False, error=str(exc))
+
+    registry.register(safe_read, name="read_file", description="Read sandboxed file.")
+
+    fake_llm = FakeLLMClient(
+        responses=[
+            # Step 1: Model requests wrong filename
+            LLMResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(
+                        id="call_f1",
+                        name="read_file",
+                        arguments={"file_path": "wrong.txt"},
+                    )
+                ],
+            ),
+            # Step 2: Model handles file not found error and requests correct file
+            LLMResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(
+                        id="call_f2",
+                        name="read_file",
+                        arguments={"file_path": "target.txt"},
+                    )
+                ],
+            ),
+            # Step 3: Model receives contents and answers
+            LLMResponse(
+                text="The target file contains: Hello AgentKit!",
+                tool_calls=[],
+            ),
+        ]
+    )
+
+    agent = Agent(
+        llm=fake_llm,
+        registry=registry,
+        config=AgentConfig(max_steps=5),
+    )
+
+    result = await agent.run(goal="Read target.txt")
+    assert result.status == RunStatus.SUCCEEDED
+    assert result.final_answer == "The target file contains: Hello AgentKit!"
+
+    tool_turns = [m for m in fake_llm.history[-1] if m.role.value == "tool"]
+    assert len(tool_turns) == 2
+    assert "not found" in tool_turns[0].content.lower()
+    assert "hello agentkit!" in tool_turns[1].content.lower()
