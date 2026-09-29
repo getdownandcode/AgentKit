@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentkit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-agentkit}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-agentkit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - agentkit-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: agentkit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - agentkit-net
+
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentkit-migrations
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
+    networks:
+      - agentkit-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentkit-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
+      - API_KEYS=${API_KEYS:-ak_test_key_12345}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - sandbox_data:/tmp/agentkit_sandbox
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - agentkit-net
+
+volumes:
+  postgres_data:
+    name: agentkit_postgres_data
+  redis_data:
+    name: agentkit_redis_data
+  sandbox_data:
+    name: agentkit_sandbox_data
+
+networks:
+  agentkit-net:
+    name: agentkit_net
+    driver: bridge
