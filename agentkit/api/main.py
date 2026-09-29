@@ -19,6 +19,7 @@ from agentkit.core.errors import (
     AuthenticationError,
     LLMProviderError,
     LLMRateLimitError,
+    RateLimitExceededError,
     RunNotFoundError,
     RunTimeoutError,
     ToolNotFoundError,
@@ -35,7 +36,7 @@ def map_agentkit_error_status(exc: AgentKitError) -> int:
         return 404
     if isinstance(exc, RunTimeoutError):
         return 504
-    if isinstance(exc, LLMRateLimitError):
+    if isinstance(exc, (LLMRateLimitError, RateLimitExceededError)):
         return 429
     if isinstance(exc, LLMProviderError):
         return 502
@@ -83,7 +84,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def agentkit_error_handler(_request: Request, exc: AgentKitError) -> JSONResponse:
         status_code = map_agentkit_error_status(exc)
         logger.warning("AgentKitError occurred: %s (status %d)", exc, status_code)
-        return JSONResponse(status_code=status_code, content={"error": exc.to_dict()})
+        headers: dict[str, str] = {}
+        if isinstance(exc, RateLimitExceededError):
+            headers["Retry-After"] = str(exc.retry_after)
+        return JSONResponse(
+            status_code=status_code, content={"error": exc.to_dict()}, headers=headers
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
@@ -103,11 +109,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
         logger.info("HTTP exception: %d - %s", exc.status_code, exc.detail)
+        code = "RATE_LIMIT_EXCEEDED" if exc.status_code == 429 else "HTTP_ERROR"
         return JSONResponse(
             status_code=exc.status_code,
+            headers=exc.headers,
             content={
                 "error": {
-                    "code": "HTTP_ERROR",
+                    "code": code,
                     "message": str(exc.detail),
                 }
             },

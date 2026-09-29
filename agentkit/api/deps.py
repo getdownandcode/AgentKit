@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
 
 from fastapi import Depends, Request
 from redis.asyncio import Redis
@@ -47,7 +46,7 @@ async def get_db_session(
             yield session
 
 
-def get_redis_client(request: Request) -> Redis[Any] | None:
+def get_redis_client(request: Request) -> Redis | None:
     """Retrieve shared Redis connection pool client."""
     return getattr(request.app.state, "redis_client", None)
 
