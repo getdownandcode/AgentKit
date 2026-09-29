@@ -16,8 +16,8 @@ from agentkit.core.agent import Agent, AgentConfig
 from agentkit.core.pg_trace import PostgresTraceSink
 from agentkit.core.trace import InMemoryTraceSink, TraceSink
 from agentkit.llm.base import LLMClient
+from agentkit.llm.factory import create_llm_client_from_settings
 from agentkit.llm.fake import FakeLLMClient
-from agentkit.llm.gemini import GeminiClient
 from agentkit.memory.base import InMemoryMemoryStore, MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
 from agentkit.tools.builtin.calculator import calculator
@@ -109,11 +109,13 @@ def get_llm_client(
         client: LLMClient = request.app.state.llm_client
         return client
 
-    if settings.GEMINI_API_KEY:
-        return GeminiClient(api_key=settings.GEMINI_API_KEY, model=settings.LLM_MODEL)
-
-    logger.warning("No LLM API keys provided; falling back to FakeLLMClient")
-    return FakeLLMClient()
+    try:
+        return create_llm_client_from_settings(settings)
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize configured LLM client (%s); falling back to FakeLLMClient", exc
+        )
+        return FakeLLMClient()
 
 
 def get_agent(
