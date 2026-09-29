@@ -70,6 +70,18 @@ async def execute_tool(
 
         latency_ms = get_latency_ms()
 
+        if isinstance(raw_output, ToolResult):
+            updates: dict[str, Any] = {}
+            if raw_output.latency_ms == 0:
+                updates["latency_ms"] = latency_ms
+            if raw_output.ok and len(raw_output.output) > max_chars:
+                updates["output"] = (
+                    raw_output.output[:max_chars]
+                    + f"\n[Output truncated: exceeded {max_chars} character limit]"
+                )
+                updates["truncated"] = True
+            return raw_output.model_copy(update=updates) if updates else raw_output
+
         # Format output as string
         output_str = raw_output if isinstance(raw_output, str) else str(raw_output)
 
