@@ -287,6 +287,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented `scripts/seed_demo_db.sql` populating `products` and `orders` tables with ANSI-standard SQL. Created `examples/demo.py` showcasing an autonomous agent solving a multi-step analytical problem by querying the database using `sql_readonly` and calculating revenue with sales tax via `calculator`. Supported deterministic offline execution using `FakeLLMClient` alongside live providers. Added integration tests in `tests/integration/test_demo.py`.
 
+### M12-T02: AWS Deployment Guide
+- **Status**: Done
+- **PR**: #42
+- **Commits**: 2
+- **Notes**: Authored comprehensive single-node AWS EC2 production deployment guide in `docs/DEPLOY.md`. Covered architecture diagrams, EC2 hardware sizing recommendations, strict Security Group isolation rules (prohibiting public database/redis ingress), host Docker CE setup, dynamic AWS SSM Parameter Store secrets retrieval script, production systemd daemon unit (`agentkit.service`), automated TLS reverse proxy configurations for both Caddy and Nginx + Certbot, post-deployment health verification, and daily S3 database backup crons.
+
+
 
 
 
