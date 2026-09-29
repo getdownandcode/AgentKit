@@ -293,6 +293,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Authored comprehensive single-node AWS EC2 production deployment guide in `docs/DEPLOY.md`. Covered architecture diagrams, EC2 hardware sizing recommendations, strict Security Group isolation rules (prohibiting public database/redis ingress), host Docker CE setup, dynamic AWS SSM Parameter Store secrets retrieval script, production systemd daemon unit (`agentkit.service`), automated TLS reverse proxy configurations for both Caddy and Nginx + Certbot, post-deployment health verification, and daily S3 database backup crons.
 
+### M12-T03: Comprehensive Portfolio README
+- **Status**: Done
+- **PR**: #43
+- **Commits**: 2
+- **Notes**: Authored complete portfolio `README.md` with CI badge roster, architecture Mermaid flowchart illustrating the ReAct loop and dual-persistence layer, quickstart guide with Docker Compose and local setup, 10-line `@tool` creation tutorial with automatic schema introspection, third-party LLM provider extension guide (`AnthropicClient`), sample `StepTrace` JSON telemetry output, ADRs summary (ADR-001 through ADR-004), AWS production deployment references, testing guides, current limitations, and future roadmap.
+
+
 
 
 
