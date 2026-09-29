@@ -125,7 +125,7 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
 ---
 
 ## Milestone 11: Containerization & CI Pipeline
-- [ ] **M11-T01: Multi-Stage Production Dockerfile (`Dockerfile`)**
+- [x] **M11-T01: Multi-Stage Production Dockerfile (`Dockerfile`)**
   - **Criteria**: Multi-stage build (builder + runtime), non-root user (`agentkit`), slim python base image, pinned dependencies, healthcheck instruction; verifies container builds successfully.
 - [ ] **M11-T02: Docker Compose Environment (`docker-compose.yml`)**
   - **Criteria**: Services for `api`, `postgres`, `redis`; automated migration run on boot; environment file configuration; healthchecks and dependency conditions (`depends_on: service_healthy`).

@@ -262,6 +262,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented exhaustive unit security test suite in `tests/unit/test_security_tools.py` covering AST evasion (blocking `eval`, `exec`, `open`, `__import__`, subclasses, lambda, comprehensions), SQL injection defenses (blocking DDL, DML, multi-statement queries, comments, PRAGMA/VACUUM), path traversal and symlink escapes in sandboxed file reader, and SSRF defenses (blocking loopbacks, RFC 1918 subnets, cloud metadata endpoints, non-HTTP schemes).
 
+### M11-T01: Multi-Stage Production Dockerfile
+- **Status**: Done
+- **PR**: #38
+- **Commits**: 2
+- **Notes**: Created `.dockerignore` to exclude local caches and virtual environments, and multi-stage `Dockerfile` with `python:3.12-slim` builder and runtime stages. Configured non-root system user `agentkit` (UID 1000), sandboxed file directory `/tmp/agentkit_sandbox`, healthcheck instruction probing `/health`, and uvicorn application entrypoint.
+
+
 
 
 
