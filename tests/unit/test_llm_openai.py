@@ -1,16 +1,16 @@
 from unittest.mock import AsyncMock, MagicMock
+
 import openai
 import pytest
 
 from agentkit.core.errors import AuthenticationError, LLMProviderError, RateLimitExceededError
-from agentkit.core.types import Role
 from agentkit.llm.base import Message
 from agentkit.llm.openai import OpenAIClient
 from agentkit.tools.models import ToolCall, ToolSchema
 
 
 @pytest.fixture
-def mock_openai_client():
+def mock_openai_client() -> MagicMock:
     client = MagicMock()
     client.chat.completions.create = AsyncMock()
     return client
@@ -29,7 +29,7 @@ def test_openai_client_init_with_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_client_chat_text_response(mock_openai_client) -> None:
+async def test_openai_client_chat_text_response(mock_openai_client: MagicMock) -> None:
     adapter = OpenAIClient(client=mock_openai_client, model="gpt-4o-mini")
 
     mock_choice = MagicMock()
@@ -69,7 +69,7 @@ async def test_openai_client_chat_text_response(mock_openai_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_client_chat_tool_calls(mock_openai_client) -> None:
+async def test_openai_client_chat_tool_calls(mock_openai_client: MagicMock) -> None:
     adapter = OpenAIClient(client=mock_openai_client)
 
     mock_tc = MagicMock()
@@ -131,7 +131,7 @@ async def test_openai_client_chat_tool_calls(mock_openai_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_client_message_conversion(mock_openai_client) -> None:
+async def test_openai_client_message_conversion(mock_openai_client: MagicMock) -> None:
     adapter = OpenAIClient(client=mock_openai_client)
 
     mock_choice = MagicMock()
@@ -175,7 +175,7 @@ async def test_openai_client_message_conversion(mock_openai_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_client_error_handling(mock_openai_client) -> None:
+async def test_openai_client_error_handling(mock_openai_client: MagicMock) -> None:
     adapter = OpenAIClient(client=mock_openai_client)
 
     # Authentication error
