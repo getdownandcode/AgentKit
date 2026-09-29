@@ -250,6 +250,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Implemented integration tests in `tests/integration/test_recovery.py` verifying that when a tool call fails with a computational error (calculator division by zero) or a file system error (sandboxed file not found), the error message is preserved in the conversation history as a tool response turn and the model successfully self-corrects its arguments on subsequent turns.
 
+### M10-T02: Prompt Injection Resistance Test
+- **Status**: Done
+- **PR**: #36
+- **Commits**: 2
+- **Notes**: Implemented integration tests in `tests/integration/test_injection.py` verifying that prompt injection attack payloads in tool outputs and error messages are strictly quarantined within `Role.TOOL` message turns and cannot overwrite system instructions or hijack the agent's behavior. Updated `agentkit/tools/executor.py` to handle direct `ToolResult` returns with `model_copy`.
+
+
 
 
 
