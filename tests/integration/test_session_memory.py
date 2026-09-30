@@ -33,10 +33,9 @@ class MemoryInspectingFakeLLM(FakeLLMClient):
         self,
         messages: list[Message],
         tools: Any = None,
-        system_prompt: str | None = None,
     ) -> LLMResponse:
         self.received_histories.append([m.model_copy() for m in messages])
-        return await super().chat(messages, tools, system_prompt)
+        return await super().chat(messages, tools)
 
 
 @pytest.mark.asyncio
@@ -63,7 +62,9 @@ async def test_session_memory_persists_across_runs_in_core_agent() -> None:
     session_id = "test-persistent-session-42"
 
     # Turn 1: User introduces name and preference
-    res1 = await agent.run(goal="My name is Alice and my favorite language is Python.", session_id=session_id)
+    res1 = await agent.run(
+        goal="My name is Alice and my favorite language is Python.", session_id=session_id
+    )
     assert res1.final_answer == "Hello Alice! I have noted your favorite language is Python."
 
     # Verify messages saved to Redis session store
@@ -83,7 +84,8 @@ async def test_session_memory_persists_across_runs_in_core_agent() -> None:
     assert "My name is Alice and my favorite language is Python." in user_goals
     assert "What is my favorite language?" in user_goals
 
-    await redis.aclose()
+    close_fn = getattr(redis, "aclose", redis.close)
+    await close_fn()
 
 
 @pytest.mark.asyncio
@@ -146,4 +148,5 @@ async def test_session_memory_persists_across_api_runs() -> None:
     turn2_contents = [m.content for m in llm.received_histories[1]]
     assert "The secret code is blue-falcon-42" in turn2_contents
 
-    await redis.aclose()
+    close_fn = getattr(redis, "aclose", redis.close)
+    await close_fn()

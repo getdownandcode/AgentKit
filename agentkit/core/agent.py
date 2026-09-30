@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agentkit.core.errors import DuplicateToolCallLoopError, MaxStepsExceeded, RunTimeoutError
 from agentkit.core.log import log_context, set_current_step_no
 from agentkit.core.trace import StepTrace, TraceSink
-from agentkit.core.types import RunStatus
+from agentkit.core.types import Role, RunStatus
 from agentkit.llm.base import LLMClient, Message
 from agentkit.tools.registry import ToolRegistry
 
@@ -112,6 +112,10 @@ class Agent:
                     )
 
             async def _finalize_and_return(result: RunResult) -> RunResult:
+                if session_id and self.memory is not None and hasattr(self.memory, "save_messages"):
+                    with contextlib.suppress(Exception):
+                        await self.memory.save_messages(session_id, messages)
+
                 if self.memory is not None and hasattr(self.memory, "update_run"):
                     with contextlib.suppress(Exception):
                         await self.memory.update_run(
@@ -124,10 +128,22 @@ class Agent:
                         )
                 return result
 
-            messages: list[Message] = [
-                Message.system(self.config.system_prompt),
-                Message.user(goal),
-            ]
+            messages: list[Message] = []
+            if session_id and self.memory is not None and hasattr(self.memory, "get_messages"):
+                with contextlib.suppress(Exception):
+                    loaded = await self.memory.get_messages(session_id)
+                    if loaded:
+                        messages = list(loaded)
+
+            if not messages:
+                messages = [
+                    Message.system(self.config.system_prompt),
+                    Message.user(goal),
+                ]
+            else:
+                if messages[0].role != Role.SYSTEM:
+                    messages.insert(0, Message.system(self.config.system_prompt))
+                messages.append(Message.user(goal))
 
             total_input_tokens = 0
             total_output_tokens = 0
@@ -239,6 +255,7 @@ class Agent:
                             # Final natural language answer reached
                             duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
                             logger.info("Agent run succeeded in %d ms", duration_ms)
+                            messages.append(Message.assistant(response.text))
                             return await _finalize_and_return(
                                 RunResult(
                                     run_id=run_id,
