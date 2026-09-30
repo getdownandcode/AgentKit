@@ -19,6 +19,8 @@ from agentkit.llm.factory import create_llm_client_from_settings
 from agentkit.llm.fake import FakeLLMClient
 from agentkit.memory.base import InMemoryMemoryStore, MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
+from agentkit.memory.redis_store import RedisMemoryStore
+from agentkit.memory.tiered import TieredMemoryStore
 from agentkit.tools.builtin.calculator import calculator
 from agentkit.tools.builtin.http_fetch import http_fetch
 from agentkit.tools.builtin.read_file import read_file
@@ -58,10 +60,23 @@ def get_memory_store(request: Request) -> PostgresMemoryStore | MemoryStore:
         return store
 
     factory = get_session_factory(request)
-    if factory is not None:
-        return PostgresMemoryStore(factory)
+    redis_client = get_redis_client(request)
+    settings: Settings = getattr(request.app.state, "settings", None) or get_current_settings(
+        request
+    )
 
-    return InMemoryMemoryStore()
+    run_store: PostgresMemoryStore | InMemoryMemoryStore = (
+        PostgresMemoryStore(factory) if factory is not None else InMemoryMemoryStore()
+    )
+
+    if redis_client is not None:
+        session_store = RedisMemoryStore(redis_client, ttl_s=settings.SESSION_TTL_S)
+        return TieredMemoryStore(session_store=session_store, run_store=run_store)
+
+    if isinstance(run_store, PostgresMemoryStore):
+        return TieredMemoryStore(session_store=InMemoryMemoryStore(), run_store=run_store)
+
+    return run_store
 
 
 def get_trace_sink(request: Request) -> TraceSink:
