@@ -67,6 +67,10 @@ class ToolCall(BaseModel):
         validation_alias=AliasChoices("arguments", "args"),
         description="Parsed tool arguments.",
     )
+    thought_signature: bytes | None = Field(
+        default=None,
+        description="Optional provider thought signature for preserving tool call state across turns.",
+    )
 
 
 class ToolSchema(BaseModel):

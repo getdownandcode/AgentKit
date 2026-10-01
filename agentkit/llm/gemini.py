@@ -18,14 +18,14 @@ class GeminiClient(LLMClient):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-2.0-flash",
         client: Any | None = None,
     ) -> None:
         """Initialize the Gemini client adapter.
 
         Args:
             api_key: Gemini API key. If omitted, google-genai attempts ADC/env lookup.
-            model: Gemini model identifier (default: gemini-2.5-flash).
+            model: Gemini model identifier (default: gemini-2.0-flash).
             client: Optional pre-configured genai.Client instance (useful for mocking).
         """
         self.model = model
@@ -60,6 +60,13 @@ class GeminiClient(LLMClient):
         system_instruction: str | None = None
         contents: list[types.Content] = []
 
+        # Map tool_call_id to tool_name for matching function responses
+        tool_id_to_name: dict[str, str] = {}
+        for msg in messages:
+            if msg.role == Role.ASSISTANT:
+                for tc in msg.tool_calls:
+                    tool_id_to_name[tc.id] = tc.name
+
         # Convert messages
         for msg in messages:
             if msg.role == Role.SYSTEM:
@@ -76,18 +83,31 @@ class GeminiClient(LLMClient):
                 if msg.content:
                     parts.append(types.Part.from_text(text=msg.content))
                 for tc in msg.tool_calls:
-                    parts.append(
-                        types.Part.from_function_call(
-                            name=tc.name,
-                            args=tc.arguments,
+                    if tc.thought_signature is not None:
+                        parts.append(
+                            types.Part(
+                                function_call=types.FunctionCall(
+                                    name=tc.name,
+                                    args=tc.arguments,
+                                ),
+                                thought_signature=tc.thought_signature,
+                            )
                         )
-                    )
+                    else:
+                        parts.append(
+                            types.Part.from_function_call(
+                                name=tc.name,
+                                args=tc.arguments,
+                            )
+                        )
                 contents.append(types.Content(role="model", parts=parts))
             elif msg.role == Role.TOOL:
-                tool_name = msg.tool_call_id or "tool"
+                tool_name = (
+                    tool_id_to_name.get(msg.tool_call_id or "") or msg.tool_call_id or "tool"
+                )
                 contents.append(
                     types.Content(
-                        role="user",
+                        role="tool",
                         parts=[
                             types.Part.from_function_response(
                                 name=tool_name,
@@ -144,11 +164,14 @@ class GeminiClient(LLMClient):
                         text_parts.append(part.text)
                     if getattr(part, "function_call", None):
                         fc = part.function_call
+                        raw_sig = getattr(part, "thought_signature", None)
+                        sig = raw_sig if isinstance(raw_sig, bytes) else None
                         tool_calls.append(
                             ToolCall(
                                 id=str(uuid.uuid4())[:8],
                                 name=fc.name,
                                 arguments=dict(fc.args or {}),
+                                thought_signature=sig,
                             )
                         )
 
@@ -166,7 +189,9 @@ class GeminiClient(LLMClient):
         metadata: dict[str, Any] = {}
         if hasattr(raw_response, "model_dump"):
             try:
-                metadata = raw_response.model_dump()
+                dumped = raw_response.model_dump()
+                if isinstance(dumped, dict):
+                    metadata = dumped
             except Exception:
                 metadata = {}
 
