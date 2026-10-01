@@ -42,15 +42,21 @@ def test_create_unknown_provider_raises() -> None:
         create_llm_client(provider="claude")
 
 
+from agentkit.llm.retry import RetryingLLMClient
+
+
 def test_create_from_settings_gemini() -> None:
     settings = Settings(
         LLM_PROVIDER="gemini",
         LLM_MODEL="gemini-2.0-flash",
         GEMINI_API_KEY="test-gemini-key",
+        MAX_RETRIES=3,
     )
     client = create_llm_client_from_settings(settings)
-    assert isinstance(client, GeminiClient)
+    assert isinstance(client, RetryingLLMClient)
+    assert isinstance(client._client, GeminiClient)
     assert client.model == "gemini-2.0-flash"
+    assert client._max_retries == 3
 
 
 def test_create_from_settings_openai() -> None:
@@ -58,13 +64,30 @@ def test_create_from_settings_openai() -> None:
         LLM_PROVIDER="openai",
         LLM_MODEL="gpt-4o",
         OPENAI_API_KEY="test-openai-key",
+        MAX_RETRIES=2,
     )
     client = create_llm_client_from_settings(settings)
-    assert isinstance(client, OpenAIClient)
+    assert isinstance(client, RetryingLLMClient)
+    assert isinstance(client._client, OpenAIClient)
     assert client.model == "gpt-4o"
+    assert client._max_retries == 2
+
+
+def test_create_from_settings_zero_retries() -> None:
+    settings = Settings(
+        LLM_PROVIDER="gemini",
+        LLM_MODEL="gemini-2.0-flash",
+        GEMINI_API_KEY="test-gemini-key",
+        MAX_RETRIES=0,
+    )
+    client = create_llm_client_from_settings(settings)
+    assert isinstance(client, GeminiClient)
+    assert not isinstance(client, RetryingLLMClient)
 
 
 def test_create_from_settings_fake() -> None:
     settings = Settings(LLM_PROVIDER="fake")
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, FakeLLMClient)
+    assert not isinstance(client, RetryingLLMClient)
+
