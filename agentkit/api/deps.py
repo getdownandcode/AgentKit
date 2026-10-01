@@ -14,11 +14,10 @@ from agentkit.config import Settings
 from agentkit.core.agent import Agent, AgentConfig
 from agentkit.core.errors import ServiceUnavailableError
 from agentkit.core.pg_trace import PostgresTraceSink
-from agentkit.core.trace import InMemoryTraceSink, TraceSink
+from agentkit.core.trace import TraceSink
 from agentkit.llm.base import LLMClient
 from agentkit.llm.factory import create_llm_client_from_settings
-from agentkit.llm.fake import FakeLLMClient
-from agentkit.memory.base import InMemoryMemoryStore, MemoryStore
+from agentkit.memory.base import MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
 from agentkit.memory.redis_store import RedisMemoryStore
 from agentkit.memory.tiered import TieredMemoryStore
@@ -61,42 +60,56 @@ def get_redis_client(request: Request) -> Redis | None:
 
 
 def get_memory_store(request: Request) -> PostgresMemoryStore | MemoryStore:
-    """Retrieve or construct the persistence memory store."""
+    """Retrieve or construct the persistence memory store.
+
+    Requires live PostgreSQL and Redis infrastructure in production. Explicit test
+    overrides can be supplied via request.app.state.memory_store.
+    """
     if hasattr(request.app.state, "memory_store") and request.app.state.memory_store is not None:
         store: PostgresMemoryStore | MemoryStore = request.app.state.memory_store
         return store
 
     factory = get_session_factory(request)
+    if factory is None:
+        raise ServiceUnavailableError(
+            "database",
+            "Database is not configured. Session factory is absent from application state.",
+        )
+
     redis_client = get_redis_client(request)
+    if redis_client is None:
+        raise ServiceUnavailableError(
+            "redis",
+            "Redis is not configured. Redis client is absent from application state.",
+        )
+
     settings: Settings = getattr(request.app.state, "settings", None) or get_current_settings(
         request
     )
 
-    run_store: PostgresMemoryStore | InMemoryMemoryStore = (
-        PostgresMemoryStore(factory) if factory is not None else InMemoryMemoryStore()
-    )
-
-    if redis_client is not None:
-        session_store = RedisMemoryStore(redis_client, ttl_s=settings.SESSION_TTL_S)
-        return TieredMemoryStore(session_store=session_store, run_store=run_store)
-
-    if isinstance(run_store, PostgresMemoryStore):
-        return TieredMemoryStore(session_store=InMemoryMemoryStore(), run_store=run_store)
-
-    return run_store
+    run_store = PostgresMemoryStore(factory)
+    session_store = RedisMemoryStore(redis_client, ttl_s=settings.SESSION_TTL_S)
+    return TieredMemoryStore(session_store=session_store, run_store=run_store)
 
 
 def get_trace_sink(request: Request) -> TraceSink:
-    """Retrieve or construct the step trace telemetry sink."""
+    """Retrieve or construct the step trace telemetry sink.
+
+    Requires live PostgreSQL infrastructure in production. Explicit test overrides
+    can be supplied via request.app.state.trace_sink.
+    """
     if hasattr(request.app.state, "trace_sink") and request.app.state.trace_sink is not None:
         sink: TraceSink = request.app.state.trace_sink
         return sink
 
     factory = get_session_factory(request)
-    if factory is not None:
-        return PostgresTraceSink(factory)
+    if factory is None:
+        raise ServiceUnavailableError(
+            "database",
+            "Database is not configured. Session factory is absent from application state.",
+        )
 
-    return InMemoryTraceSink()
+    return PostgresTraceSink(factory)
 
 
 def create_default_tool_registry() -> ToolRegistry:
@@ -125,18 +138,16 @@ def get_llm_client(
     request: Request,
     settings: Settings = Depends(get_current_settings),
 ) -> LLMClient:
-    """Resolve configured LLM client."""
+    """Resolve configured LLM client.
+
+    Instantiates the configured provider from settings. Explicit test overrides
+    can be supplied via request.app.state.llm_client.
+    """
     if hasattr(request.app.state, "llm_client") and request.app.state.llm_client is not None:
         client: LLMClient = request.app.state.llm_client
         return client
 
-    try:
-        return create_llm_client_from_settings(settings)
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize configured LLM client (%s); falling back to FakeLLMClient", exc
-        )
-        return FakeLLMClient()
+    return create_llm_client_from_settings(settings)
 
 
 def get_agent(

@@ -66,9 +66,9 @@ def test_llm_client_does_not_silently_fallback_to_fake() -> None:
     # If GEMINI_API_KEY is empty/invalid and ADC fails, it must raise AuthenticationError, not return FakeLLMClient
     try:
         client = get_llm_client(req, settings=settings)  # type: ignore[arg-type]
-        assert not isinstance(
-            client, FakeLLMClient
-        ), "get_llm_client must not return FakeLLMClient when LLM_PROVIDER is 'gemini'"
+        assert not isinstance(client, FakeLLMClient), (
+            "get_llm_client must not return FakeLLMClient when LLM_PROVIDER is 'gemini'"
+        )
     except AuthenticationError:
         pass  # Expected authentic error, not swallowed into FakeLLMClient
 
