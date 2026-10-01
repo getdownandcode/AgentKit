@@ -71,7 +71,9 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
-      - API_KEYS=${API_KEYS:-ak_test_key_12345}
+      # No default: the stack refuses to start without an explicit API_KEYS value so a
+      # known test key can never reach a reachable instance. Export one in .env.
+      - API_KEYS=${API_KEYS:?API_KEYS must be set, e.g. API_KEYS=ak_local_dev_key}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
