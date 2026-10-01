@@ -71,6 +71,11 @@ class Settings(BaseSettings):
         gt=0,
         description="Maximum execution steps allowed per agent run.",
     )
+    MAX_RETRIES: int = Field(
+        default=3,
+        ge=0,
+        description="Maximum retries on transient LLM errors.",
+    )
     RUN_TIMEOUT_S: int = Field(
         default=60,
         gt=0,
