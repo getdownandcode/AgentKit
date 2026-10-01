@@ -299,15 +299,20 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Authored complete portfolio `README.md` with CI badge roster, architecture Mermaid flowchart illustrating the ReAct loop and dual-persistence layer, quickstart guide with Docker Compose and local setup, 10-line `@tool` creation tutorial with automatic schema introspection, third-party LLM provider extension guide (`AnthropicClient`), sample `StepTrace` JSON telemetry output, ADRs summary (ADR-001 through ADR-004), AWS production deployment references, testing guides, current limitations, and future roadmap.
 
+### M13-T01: Real-Infrastructure Test Tier
+- **Status**: Done
+- **PR**: #44
+- **Commits**: 1
+- **Notes**: Added `tests/conftest.py` providing opt-in live fixtures and `tests/real/` covering `PostgresMemoryStore`, `PostgresTraceSink`, `RedisMemoryStore`, the rate limiter and a full-lifespan API round trip. The suite applies Alembic migrations through the real PostgreSQL dialect, verifies native `uuid`/`json`/`timestamptz` round trips, `ON DELETE CASCADE`, FK rejection of orphan steps, genuine Redis TTL expiry and the hiredis codec. Skips unless `AGENTKIT_REAL_INFRA=1`; truncates `runs`/`steps` and deletes only `session:*` / `ratelimit:*` keys.
 
+### M13-T02: Atomic Sliding-Window Rate Limiting
+- **Status**: Done
+- **PR**: #44
+- **Commits**: 1
+- **Notes**: A concurrency test against live Redis revealed the limiter admitted 19 of 20 simultaneous requests against a limit of 5, because `ZCARD` was read and `ZADD` written in separate round trips with an `await` between them. Replaced with a Lua script performing trim, count and insert as one indivisible operation, retaining a non-atomic fallback only for deployments that forbid scripting. Added `lupa` as a dev dependency so fakeredis exercises the same script path as production.
 
-
-
-
-
-
-
-
-
-
-
+### M13-T03: CI Split, Compose Hardening and Documentation Corrections
+- **Status**: Done
+- **PR**: #44
+- **Commits**: 1
+- **Notes**: Split CI into a hermetic Python matrix job and a `Test Against Live PostgreSQL and Redis` job that runs the `real_infra` tier against real service containers. Fixed `get_db_session`, which returned without yielding when no session factory was configured and would have surfaced as an opaque `generator didn't yield` RuntimeError; it now raises `ServiceUnavailableError` mapped to HTTP 503, and `lifespan` reuses the `agentkit.db.session` helpers instead of duplicating engine construction. `docker-compose.yml` no longer defaults `API_KEYS` to a known test key. `examples/demo.py` now persists run and step records to real PostgreSQL and Redis by default. Corrected the README and this file's earlier claims that CI exercised the database and cache.

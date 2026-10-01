@@ -118,8 +118,13 @@ JWT_SECRET=super_secret_jwt_key_at_least_32_bytes_long
 ```
 
 ### 4. Running with Docker Compose (Recommended)
-Launch the API, PostgreSQL, and Redis together with automatic migrations:
+Launch the API, PostgreSQL, and Redis together with automatic migrations.
+
+`API_KEYS` has no default in `docker-compose.yml`: the stack refuses to start until you
+supply one, so a known test key can never reach a reachable instance.
+
 ```bash
+export API_KEYS=ak_local_dev_key   # or place API_KEYS in your .env
 docker compose up -d --build
 
 # Verify all services are healthy
@@ -135,11 +140,20 @@ curl -s http://localhost:8000/health | jq .
 AgentKit includes a complete multi-tool demo script that seeds a database and combines SQL analysis with mathematical calculation:
 
 ```bash
-# Completely offline demo (using FakeLLMClient - no API keys required!)
-python examples/demo.py --offline
-
-# Or live with Gemini:
+# Against real infrastructure (PostgreSQL + Redis from your .env).
+# Run and step records are persisted exactly as they would be in production.
+docker compose up -d postgres redis
+alembic upgrade head
 python examples/demo.py --provider gemini
+
+# Or completely offline (FakeLLMClient + in-memory SQLite - no services, no API keys)
+python examples/demo.py --offline
+```
+
+The demo prints the run ID; you can then inspect what it wrote:
+
+```bash
+curl -s -H "X-API-Key: $API_KEYS" "http://localhost:8000/runs/<run_id>/trace" | jq .
 ```
 
 ---
@@ -288,7 +302,7 @@ Complete step-by-step instructions, including security group rules, systemd serv
 AgentKit enforces strict code quality and comprehensive test coverage across all layers:
 
 ```bash
-# Run the complete test suite
+# Run the complete hermetic test suite (no services required)
 pytest -v
 
 # Run with test coverage report (enforcing >=85% threshold)
@@ -302,7 +316,43 @@ ruff format --check .
 mypy agentkit tests examples
 ```
 
-All pull requests trigger the automated GitHub Actions CI matrix running on Python 3.11 and 3.12 with live PostgreSQL 16 and Redis 7 service containers.
+### Two test tiers
+
+The default suite is hermetic: SQLite, `fakeredis` and `FakeLLMClient` stand in for
+PostgreSQL, Redis and the LLM providers, so `pytest` runs in about two seconds with no
+services. A second, opt-in tier runs the same components against **live** PostgreSQL and
+Redis, covering behaviour the hermetic tier structurally cannot assert:
+
+- native `uuid` / `json` / `timestamptz` columns and asyncpg parameter binding
+- real foreign-key enforcement and `ON DELETE CASCADE` (SQLite ignores FKs by default)
+- Alembic migrations applied through the real PostgreSQL dialect
+- genuine Redis TTL expiry and the hiredis codec
+- the Lua-backed atomic rate limiter under concurrency
+
+```bash
+# Start the services the tier needs
+docker compose up -d postgres redis
+
+# Run only the real-infrastructure suite
+AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real
+
+# Or point it at any other PostgreSQL / Redis
+AGENTKIT_REAL_INFRA=1 \
+  DATABASE_TEST_URL=postgresql+asyncpg://user:pass@localhost:5432/agentkit_test \
+  REDIS_TEST_URL=redis://localhost:6379/15 \
+  pytest -m real_infra tests/real
+```
+
+Without `AGENTKIT_REAL_INFRA=1` these tests skip, so the default `pytest` invocation stays
+hermetic. The suite truncates the `runs` and `steps` tables and deletes only
+`session:*` / `ratelimit:*` Redis keys, so point it at a dedicated test database.
+
+### CI
+
+All pull requests trigger GitHub Actions with three jobs: `Lint & Type Check`; a hermetic
+`Test Hermetic` matrix across Python 3.11 and 3.12 with coverage gating; and
+`Test Against Live PostgreSQL and Redis`, which runs the `real_infra` tier against real
+PostgreSQL 16 and Redis 7 service containers.
 
 ---
 
