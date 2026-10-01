@@ -8,6 +8,11 @@ MAX_EXPRESSION_LEN = 1000
 MAX_AST_NODES = 100
 MAX_EXPONENT = 1000
 
+#: Rough ceiling on the bit length of an exponentiation result. 10**1000 is ~3322 bits and
+#: still cheap once, but the ReAct loop can repeat the call, so the result size itself is
+#: capped rather than only the exponent.
+MAX_RESULT_BITS = 4096
+
 
 def _evaluate_node(node: ast.AST) -> int | float:
     """Recursively evaluate an AST node against a strict whitelist of arithmetic operations."""
@@ -53,6 +58,20 @@ def _evaluate_node(node: ast.AST) -> int | float:
         if isinstance(node.op, ast.Pow):
             if abs(right) > MAX_EXPONENT or (abs(left) > 1000 and right > 100):
                 raise ValueError(f"Exponent too large (maximum allowed is {MAX_EXPONENT})")
+
+            # The exponent bound alone still permits enormous big integers (10**1000 is a
+            # 1001-digit result), and the agent loop can repeat the call. Bound the size of
+            # the result itself so a single expression cannot consume noticeable CPU.
+            # Only integer bases can grow; float exponentiation always yields a float.
+            if (
+                isinstance(left, int)
+                and isinstance(right, int)
+                and abs(left) > 1
+                and abs(right) * left.bit_length() > MAX_RESULT_BITS
+            ):
+                raise ValueError(
+                    f"Result too large to compute safely (exceeds {MAX_RESULT_BITS} bits)."
+                )
             return left**right
 
         raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")

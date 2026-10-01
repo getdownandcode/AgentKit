@@ -107,13 +107,13 @@ async def test_sliding_window_truncation_with_system_prompt(fake_redis: Redis[An
     await store.save_messages(session_id, messages)
 
     loaded = await store.get_messages(session_id)
-    # Total messages should be: 1 system prompt + 3 most recent messages = 4
-    assert len(loaded) == 4
+    # max_messages is a total budget, and the system prompt spends one of those slots,
+    # so the result is the system prompt plus the 2 most recent conversational messages.
+    assert len(loaded) == 3
     assert loaded[0].role == Role.SYSTEM
     assert loaded[0].content == "System prompt instructions"
-    assert loaded[1].content == "Message 2"
-    assert loaded[2].content == "Response 2"
-    assert loaded[3].content == "Message 3"
+    assert loaded[1].content == "Response 2"
+    assert loaded[2].content == "Message 3"
 
 
 @pytest.mark.asyncio

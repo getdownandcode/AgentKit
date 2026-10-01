@@ -102,7 +102,10 @@ class Agent:
         run_id = str(uuid.uuid4())
 
         with log_context(run_id=run_id):
-            logger.info("Starting agent run for goal: %s", goal)
+            # The goal is caller-supplied prompt data, so it stays out of INFO per the
+            # logging policy; only its length is recorded there.
+            logger.info("Starting agent run (goal_chars=%d, session_id=%s)", len(goal), session_id)
+            logger.debug("Run goal content: %s", goal)
             if self.memory is not None and hasattr(self.memory, "create_run"):
                 with contextlib.suppress(Exception):
                     await self.memory.create_run(

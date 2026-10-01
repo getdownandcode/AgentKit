@@ -112,17 +112,23 @@ OPENAI_API_KEY=your_openai_api_key_here
 DATABASE_URL=postgresql+asyncpg://agentkit:agentkit_password@localhost:5432/agentkit
 REDIS_URL=redis://localhost:6379/0
 
-# Security
+# Security (API_KEYS is required; the app refuses to start without it)
 API_KEYS=dev_key_1,dev_key_2
 JWT_SECRET=super_secret_jwt_key_at_least_32_bytes_long
+
+# Optional: retry policy for transient LLM failures (429/5xx/network)
+LLM_MAX_RETRIES=3
+LLM_RETRY_BASE_DELAY_S=0.5
+LLM_RETRY_MAX_DELAY_S=10
 ```
 
 ### 4. Running with Docker Compose (Recommended)
 Launch the API, PostgreSQL, and Redis together with automatic migrations.
 
-`docker-compose.yml` ships no default `API_KEYS`. Leave it unset and the api service
-fails immediately on settings validation rather than starting with a published key;
-`down`, `ps` and `logs` still work either way.
+`API_KEYS` is required in every environment, not just under compose. `Settings` rejects an
+empty value, so a deployment that forgets to configure its keys fails at startup rather than
+serving unauthenticated traffic with a key published in the repository. `docker-compose.yml`
+ships no default either; `down`, `ps` and `logs` still work without it.
 
 ```bash
 export API_KEYS=ak_local_dev_key   # or place API_KEYS in your .env

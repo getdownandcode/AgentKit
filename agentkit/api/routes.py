@@ -31,6 +31,11 @@ from agentkit.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+#: Fixed client-facing strings for failed dependency checks. Raw driver errors can contain
+#: connection URLs, credentials or internal hostnames, and /health requires no API key.
+DATABASE_UNHEALTHY = "Database connectivity check failed."
+REDIS_UNHEALTHY = "Redis connectivity check failed."
+
 runs_router = APIRouter(
     prefix="/runs",
     tags=["runs"],
@@ -47,7 +52,10 @@ async def create_run(
     memory_store: PostgresMemoryStore | MemoryStore = Depends(get_memory_store),
 ) -> RunResponse:
     """Execute an agent goal and return execution summary."""
-    logger.info("Executing run for goal: %s (session_id: %s)", payload.goal, payload.session_id)
+    # The goal is caller-supplied prompt data, so only its length is logged at INFO.
+    logger.info(
+        "Executing run (goal_chars=%d, session_id: %s)", len(payload.goal), payload.session_id
+    )
     result = await agent.run(goal=payload.goal, session_id=payload.session_id)
 
     if hasattr(memory_store, "get_run"):
@@ -153,7 +161,8 @@ async def health_check(request: Request) -> JSONResponse:
     redis_status = "healthy"
     details: dict[str, str] = {}
 
-    # Check Database Engine
+    # /health is unauthenticated, so connection error strings are logged rather than echoed:
+    # driver messages routinely embed host, port and database name.
     engine = getattr(request.app.state, "db_engine", None)
     if engine is not None:
         try:
@@ -161,23 +170,24 @@ async def health_check(request: Request) -> JSONResponse:
                 await conn.execute(text("SELECT 1"))
         except Exception as exc:
             db_status = "unhealthy"
-            details["database"] = str(exc)
+            details["database"] = DATABASE_UNHEALTHY
+            logger.warning("Database health check failed: %s", exc)
             status_code = 503
     else:
         db_status = "disabled"
 
-    # Check Redis Client
     redis_client = getattr(request.app.state, "redis_client", None)
     if redis_client is not None:
         try:
             ping_res = await redis_client.ping()
             if not ping_res:
                 redis_status = "unhealthy"
-                details["redis"] = "Ping returned False"
+                details["redis"] = REDIS_UNHEALTHY
                 status_code = 503
         except Exception as exc:
             redis_status = "unhealthy"
-            details["redis"] = str(exc)
+            details["redis"] = REDIS_UNHEALTHY
+            logger.warning("Redis health check failed: %s", exc)
             status_code = 503
     else:
         redis_status = "disabled"

@@ -167,5 +167,21 @@ class RetryingLLMClient(LLMClient):
         return await self._retrying_chat(messages=messages, tools=tools)
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute lookups to the underlying client."""
-        return getattr(self._client, name)
+        """Delegate attribute lookups to the underlying client.
+
+        ``_client`` is resolved via ``__dict__`` rather than ``getattr`` on purpose: it is
+        absent when ``__init__`` raises part-way, and ``getattr(self, "_client")`` would
+        re-enter this method and recurse until the stack blew up.
+        """
+        if name == "_client":
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute '_client'; "
+                "the wrapped client was never assigned."
+            )
+        client = self.__dict__.get("_client")
+        if client is None:
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}; "
+                "the wrapped client was never assigned."
+            )
+        return getattr(client, name)

@@ -10,6 +10,7 @@ import asyncio
 
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import ResponseError
 
 from agentkit.api.ratelimit import RateLimiter
 from agentkit.core.errors import RateLimitExceededError
@@ -81,7 +82,9 @@ async def test_sliding_window_truncation_is_persisted(real_redis: Redis[str]) ->
     )
 
     loaded = await store.get_messages("sess-truncate")
-    assert len(loaded) == 4
+    # max_messages is a total budget and the system prompt spends one of those slots,
+    # so 3 means the system prompt plus the 2 most recent messages.
+    assert len(loaded) == 3
     assert loaded[0].content == "System"
     assert loaded[-1].content == "five"
 
@@ -163,3 +166,38 @@ async def test_concurrent_checks_respect_limit(real_redis: Redis[str]) -> None:
     assert admitted == 5
     assert rejected == 15
     assert await real_redis.zcard(f"ratelimit:{key}") == 5
+
+
+async def test_non_scripting_fallback_does_not_overshoot_limit(
+    real_redis: Redis[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scripting-free fallback must enforce the limit under concurrency too.
+
+    The previous fallback trimmed and counted in one transaction, then inserted in a second.
+    Against live Redis that admitted 39 of 50 simultaneous requests against a limit of 5,
+    because the intervening round trip let every concurrent caller observe the same
+    pre-insert cardinality. The WATCH/MULTI/EXEC fallback closes that window.
+    """
+    limiter = RateLimiter(requests_per_window=5, window_seconds=60)
+
+    async def _no_scripting(*_args: object, **_kwargs: object) -> None:
+        raise ResponseError("NOSCRIPTING this Redis has scripting disabled")
+
+    monkeypatch.setattr(Redis, "eval", _no_scripting)
+
+    outcomes = await asyncio.gather(
+        *(
+            limiter._check_window_unatomic(
+                real_redis, "ratelimit:ak_fallback_concurrent", 1000.0, 60.0, 5, f"m{i}", 65
+            )
+            for i in range(50)
+        ),
+        return_exceptions=True,
+    )
+
+    assert not [o for o in outcomes if isinstance(o, BaseException)], outcomes
+    admitted = sum(1 for o in outcomes if o == (True, 0))
+    denied = sum(1 for o in outcomes if isinstance(o, tuple) and o[0] is False)
+
+    assert admitted == 5, f"expected 5 admissions, got {admitted}"
+    assert denied == 45
