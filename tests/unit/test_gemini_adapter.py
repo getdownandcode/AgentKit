@@ -126,6 +126,9 @@ async def test_gemini_multi_turn_history_translation(mock_genai_client: MagicMoc
     response = await adapter.chat(messages)
     assert response.text == "Result is 25."
     assert mock_genai_client.aio.models.generate_content.called
+    _, kwargs = mock_genai_client.aio.models.generate_content.call_args
+    contents = kwargs["contents"]
+    assert contents[2].role == "user"
 
 
 @pytest.mark.asyncio
