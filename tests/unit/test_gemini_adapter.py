@@ -126,3 +126,81 @@ async def test_gemini_multi_turn_history_translation(mock_genai_client: MagicMoc
     response = await adapter.chat(messages)
     assert response.text == "Result is 25."
     assert mock_genai_client.aio.models.generate_content.called
+
+
+@pytest.mark.asyncio
+async def test_gemini_thought_signature_capture_and_forward(mock_genai_client: MagicMock) -> None:
+    """Verify thought_signature from candidate is captured in ToolCall and forwarded back."""
+    mock_fc = MagicMock()
+    mock_fc.name = "calculator"
+    mock_fc.args = {"expression": "2 + 2"}
+
+    mock_part = MagicMock()
+    mock_part.text = None
+    mock_part.function_call = mock_fc
+    mock_part.thought_signature = b"opaque_thought_sig_xyz"
+
+    mock_candidate = MagicMock()
+    mock_candidate.content.parts = [mock_part]
+
+    mock_response = MagicMock()
+    mock_response.candidates = [mock_candidate]
+    mock_response.text = ""
+    mock_response.usage_metadata.prompt_token_count = 10
+    mock_response.usage_metadata.candidates_token_count = 5
+    mock_response.model_dump.return_value = {}
+
+    mock_genai_client.aio.models.generate_content.return_value = mock_response
+
+    adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
+
+    # 1. Turn 1: model returns tool call with thought_signature
+    messages = [Message.user("What is 2+2?")]
+    turn1_resp = await adapter.chat(messages)
+
+    assert len(turn1_resp.tool_calls) == 1
+    tc = turn1_resp.tool_calls[0]
+    assert tc.name == "calculator"
+    assert tc.thought_signature == b"opaque_thought_sig_xyz"
+
+    # 2. Turn 2: send assistant tool call with thought_signature and tool result back
+    turn2_messages = [
+        Message.user("What is 2+2?"),
+        Message.assistant(content="", tool_calls=[tc]),
+        Message(role=Role.TOOL, content="4", tool_call_id=tc.id),
+    ]
+
+    mock_response2 = MagicMock()
+    mock_response2.candidates = []
+    mock_response2.text = "The answer is 4."
+    mock_genai_client.aio.models.generate_content.return_value = mock_response2
+
+    await adapter.chat(turn2_messages)
+
+    # Verify generate_content was called with correct contents structure
+    call_kwargs = mock_genai_client.aio.models.generate_content.call_args.kwargs
+    contents = call_kwargs["contents"]
+    assert len(contents) == 3
+
+    # User message
+    assert contents[0].role == "user"
+
+    # Model message must preserve thought_signature on the function call part
+    model_content = contents[1]
+    assert model_content.role == "model"
+    model_part = model_content.parts[0]
+    assert model_part.function_call.name == "calculator"
+    assert model_part.thought_signature == b"opaque_thought_sig_xyz"
+
+    # Tool message must have role="tool" and function_response name resolved to "calculator"
+    tool_content = contents[2]
+    assert tool_content.role == "tool"
+    tool_part = tool_content.parts[0]
+    assert tool_part.function_response.name == "calculator"
+    assert tool_part.function_response.response == {"result": "4"}
+
+
+def test_gemini_default_model(mock_genai_client: MagicMock) -> None:
+    """Verify GeminiClient defaults to gemini-2.0-flash."""
+    adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
+    assert adapter.model == "gemini-2.0-flash"
