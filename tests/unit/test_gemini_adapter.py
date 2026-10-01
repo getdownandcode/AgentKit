@@ -204,6 +204,6 @@ async def test_gemini_thought_signature_capture_and_forward(mock_genai_client: M
 
 
 def test_gemini_default_model(mock_genai_client: MagicMock) -> None:
-    """Verify GeminiClient defaults to gemini-3.7-flash."""
+    """Verify GeminiClient defaults to gemini-3.8-flash."""
     adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
-    assert adapter.model == "gemini-3.7-flash"
+    assert adapter.model == "gemini-3.8-flash"
