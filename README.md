@@ -102,7 +102,7 @@ Edit `.env`:
 ```ini
 # LLM Providers (at least one key or use offline mode)
 LLM_PROVIDER=gemini
-LLM_MODEL=gemini-2.0-flash
+LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENAI_API_KEY=your_openai_api_key_here
 
@@ -351,6 +351,10 @@ All pull requests trigger GitHub Actions with three jobs: `Lint & Type Check`; a
 `Test Hermetic` matrix across Python 3.11 and 3.12 with coverage gating; and
 `Test Against Live PostgreSQL and Redis`, which runs the `real_infra` tier against real
 PostgreSQL 16 and Redis 7 service containers.
+
+### Live Infrastructure Verification Report
+
+All core agent capabilities, multi-step PostgreSQL queries, AST calculators, security defenses (SQL injection, path traversal), and rate limiters have been validated end-to-end against live PostgreSQL, Redis, and Google Gemini API in Docker Compose. See the full audit telemetry and verbatim command logs in [docs/E2E_REPORT.md](docs/E2E_REPORT.md).
 
 ---
 
