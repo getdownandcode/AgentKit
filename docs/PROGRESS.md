@@ -54,6 +54,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, tool role, gemini-2.0-flash default |
 | M13-T05 | M13       | Idempotent Demo Seeding & Compose Auto-Seed | `feat/docker-compose-seed` | #46 | 2 | Done | ON CONFLICT DO NOTHING, scripts/seed.py, compose boot auto-seed |
 | AUD-01  | AUD       | Strict Infrastructure Resolution in API Dependencies | `fix/api-deps-strict-infrastructure` | #48 | 2 | Done | Eliminate silent in-memory and fake LLM fallbacks from deps.py |
+| AUD-04  | AUD       | Wire RetryingLLMClient into LLM Factory | `fix/wire-llm-retry-wrapper` | #49 | 2 | Done | Added MAX_RETRIES setting and wrapped live LLM providers with retry |
 
 ---
 
@@ -357,5 +358,12 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #48
 - **Commits**: 2
 - **Notes**: Removed silent fallbacks to `InMemoryMemoryStore`, `InMemoryTraceSink`, and `FakeLLMClient` in `agentkit/api/deps.py`. API dependencies now strictly require live PostgreSQL and Redis services, raising `ServiceUnavailableError` (HTTP 503) if absent. `get_llm_client` now instantiates the configured provider directly and allows authentication or configuration errors to surface rather than silently masking them with a mock client. Added integration tests in `tests/integration/test_api_deps_strict.py`.
+
+### AUD-04: Wire RetryingLLMClient with MAX_RETRIES in LLM Factory
+- **Status**: Done
+- **PR**: #49
+- **Commits**: 2
+- **Notes**: Added `MAX_RETRIES: int = Field(default=3, ge=0)` to application `Settings`. Updated `create_llm_client_from_settings` in `agentkit/llm/factory.py` to wrap live providers (`gemini`, `openai`) with `RetryingLLMClient` when `MAX_RETRIES > 0`, applying exponential backoff and jitter to transient 429/5xx errors. Unit tests in `tests/unit/test_llm_factory.py`.
+
 
 
