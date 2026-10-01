@@ -51,9 +51,19 @@ _KEYWORD_REGEX = re.compile(
 #: A '#' that is not the start of a JSON path operator (#>, #>>, #-), i.e. a comment marker.
 _BARE_HASH_REGEX = re.compile(r"#(?![>~-])")
 
-#: A LIMIT or OFFSET clause at the end of the top-level statement. Statements with their own
-#: bound are left alone so wrapping never widens a caller-supplied limit.
-_TOP_LEVEL_LIMIT_REGEX = re.compile(r"\blimit\s+\d+\s*(?:;)?\s*$", re.IGNORECASE)
+#: A row-locking clause. LIMIT cannot simply be appended after one of these, so such
+#: statements take the subquery-wrap fallback instead.
+_LOCKING_CLAUSE_REGEX = re.compile(
+    r"\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b",
+    re.IGNORECASE,
+)
+
+#: A clause that already bounds the statement's own output. Such statements are executed
+#: untouched so a caller-supplied bound is never widened.
+_EXISTING_BOUND_REGEX = re.compile(
+    r"(\blimit\b|\bfetch\s+first\b)",
+    re.IGNORECASE,
+)
 
 #: Process-wide engine, created on first use. Connection pools are expensive to rebuild and
 #: are safe to share, but the engine is still injectable per call so tests and alternative
@@ -93,23 +103,30 @@ def validate_sql_query(query: str) -> str:
     if not stripped:
         raise ValueError("Empty or whitespace-only SQL query.")
 
-    # Reject comments that could hide payload structure. A bare '#' is allowed when it
-    # begins a PostgreSQL JSON path operator (#>, #>>, #-); those are legitimate in a
-    # read-only projection, whereas a '#' followed by whitespace opens a MySQL-style comment.
+    # Reject comments that could hide payload structure. The scan runs on the query with
+    # string literals and quoted identifiers blanked out, so comment markers that are merely
+    # data (WHERE note = 'x -- y', or a '#' inside a literal) do not cause false rejections.
+    # A marker can only be hidden inside quotes when it really is inside a literal, in which
+    # case the database parses it as data too. A bare '#' is allowed when it begins a
+    # PostgreSQL JSON path operator (#>, #>>, #-); those are legitimate in a read-only
+    # projection.
+    masked_structure = _mask_literals(stripped)
     if (
-        "--" in stripped
-        or "/*" in stripped
-        or "*/" in stripped
-        or _BARE_HASH_REGEX.search(stripped)
+        "--" in masked_structure
+        or "/*" in masked_structure
+        or "*/" in masked_structure
+        or _BARE_HASH_REGEX.search(masked_structure)
     ):
         raise ValueError(
             "Comments are not permitted in SQL queries to prevent security circumvention."
         )
 
     # Strip a single trailing semicolon if present. rstrip(";") would also swallow the
-    # repeated separators that signal a stacked-statement payload.
+    # repeated separators that signal a stacked-statement payload. The multi-statement scan
+    # likewise runs on the masked structure so a ';' inside a string literal is data, not a
+    # statement separator; a real separator outside any literal is still caught.
     cleaned = stripped[:-1].strip() if stripped.endswith(";") else stripped
-    if ";" in cleaned:
+    if ";" in _mask_literals(cleaned):
         raise ValueError("Multiple SQL statements separated by semicolons are strictly prohibited.")
 
     # Validate statement header: must begin with SELECT or WITH
@@ -239,25 +256,53 @@ async def _apply_statement_timeout(conn: AsyncConnection, timeout_s: float) -> N
         if dialect == "postgresql":
             await conn.execute(text(f"SET LOCAL statement_timeout = {int(timeout_s * 1000)}"))
         else:
-            await conn.execute(
-                text(f"SET STATEMENT max_execution_time={int(timeout_s * 1000)} FOR SELECT 1")
-            )
+            # MAX_EXECUTION_TIME is in milliseconds and applies session-wide to subsequent
+            # top-level SELECT statements, unlike SET STATEMENT ... FOR which would only
+            # cover the single statement it prefixes.
+            await conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {int(timeout_s * 1000)}"))
     except Exception as exc:
         # A restricted role may lack permission to set this; the client-side timeout and the
         # in-SQL row limit still bound the work, so this must not fail the query.
         logger.warning("Could not apply server-side statement timeout: %s", exc)
 
 
-def _apply_row_limit(sql: str, row_limit: int) -> str:
-    """Wrap the statement in a limited subquery when it carries no top-level LIMIT.
+def _top_level_tail(masked_sql: str) -> str:
+    """Return the trailing top-level clause of a masked statement.
 
-    An existing LIMIT or OFFSET at the end of the statement is left untouched so a caller
-    supplied bound is never widened by the wrapper.
+    Clause keywords are only meaningful at parenthesis depth zero: a LIMIT inside a subquery
+    does not bound the outer statement. Parenthesis counting on the literal-masked text is
+    exact for real queries, since quoted parentheses are already blanked out.
     """
-    bounded = f"SELECT * FROM ({sql}) AS agentkit_limited_query LIMIT {int(row_limit)}"
-    if _TOP_LEVEL_LIMIT_REGEX.search(sql):
+    depth = 0
+    tail_start = 0
+    for index, char in enumerate(masked_sql):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth <= 0:
+                depth = 0
+                tail_start = index + 1
+    return masked_sql[tail_start:]
+
+
+def _apply_row_limit(sql: str, row_limit: int) -> str:
+    """Bound the statement's output in SQL, preferring an appended LIMIT.
+
+    Appending ``LIMIT`` leaves an already-valid statement untouched in shape, so constructs
+    like duplicate output column names in a JOIN keep working exactly as written. Only two
+    cases need different handling, both detected on the trailing top-level clause:
+
+    - the statement already bounds itself (LIMIT / FETCH FIRST): executed untouched;
+    - the statement ends in a row-locking clause (FOR UPDATE / FOR SHARE), after which a
+      LIMIT cannot legally appear: wrapped in a limited subquery instead.
+    """
+    tail = _top_level_tail(_mask_literals(sql))
+    if _EXISTING_BOUND_REGEX.search(tail):
         return sql
-    return bounded
+    if _LOCKING_CLAUSE_REGEX.search(tail):
+        return f"SELECT * FROM ({sql}) AS agentkit_limited_query LIMIT {int(row_limit)}"
+    return f"{sql} LIMIT {int(row_limit)}"
 
 
 @tool

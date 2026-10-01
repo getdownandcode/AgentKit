@@ -25,10 +25,10 @@ PUBLIC_IP = "93.184.216.34"
 class _FakeNetworkStream:
     """Minimal stand-in for httpcore's AnyIOStream exposing ``server_addr``."""
 
-    def __init__(self, server_addr: tuple[str, int]) -> None:
+    def __init__(self, server_addr: object) -> None:
         self._server_addr = server_addr
 
-    def get_extra_info(self, key: str) -> tuple[str, int] | None:
+    def get_extra_info(self, key: str) -> object:
         return self._server_addr if key == "server_addr" else None
 
 
@@ -180,6 +180,33 @@ async def test_http_fetch_rejects_rebind_to_unvalidated_peer() -> None:
 
         with (
             _patch_stream(mock_response),
+            pytest.raises(ValueError, match="SSRF protection blocked"),
+        ):
+            await http_fetch("https://rebind.example.com")
+
+
+@pytest.mark.asyncio
+async def test_http_fetch_rejects_peer_outside_validated_set() -> None:
+    """A connection that lands on a public IP outside the validated set is refused.
+
+    Distinct from the loopback case above: the peer is a routable address, just not one of
+    the addresses validation approved for this host.
+    """
+    with patch(
+        "agentkit.tools.builtin.http_fetch.resolve_host_ips",
+        return_value=[PUBLIC_IP],
+    ):
+        mock_response = httpx.Response(
+            status_code=200,
+            text="internal secret",
+            request=httpx.Request("GET", "https://rebind.example.com"),
+        )
+        # 1.1.1.1 is globally routable, so it passes the restricted-address screen and
+        # reaches the validated-set comparison, which must refuse it.
+        mock_response.extensions["network_stream"] = _FakeNetworkStream(("1.1.1.1", 443))
+
+        with (
+            _patch_stream(mock_response),
             pytest.raises(ValueError, match="was not among the validated addresses"),
         ):
             await http_fetch("https://rebind.example.com")
@@ -197,6 +224,24 @@ def test_verify_peer_address_no_stream_is_permissive() -> None:
     response = httpx.Response(status_code=200, request=httpx.Request("GET", "https://example.com"))
 
     verify_peer_address(response, [PUBLIC_IP])
+
+
+@pytest.mark.parametrize("addr", [None, 12345, (), "not-a-tuple"])
+def test_verify_peer_address_malformed_server_addr_skips_cleanly(addr: object) -> None:
+    """A transport that exposes no usable peer address must not crash the check."""
+    response = httpx.Response(status_code=200, request=httpx.Request("GET", "https://example.com"))
+    response.extensions["network_stream"] = _FakeNetworkStream(addr)
+
+    verify_peer_address(response, [PUBLIC_IP])
+
+
+def test_verify_peer_address_empty_host_is_blocked() -> None:
+    """An empty peer host fails closed instead of escaping as a parsing error."""
+    response = httpx.Response(status_code=200, request=httpx.Request("GET", "https://example.com"))
+    response.extensions["network_stream"] = _FakeNetworkStream(("", 80))
+
+    with pytest.raises(ValueError, match="SSRF protection blocked"):
+        verify_peer_address(response, [PUBLIC_IP])
 
 
 @pytest.mark.parametrize(
