@@ -32,7 +32,7 @@ class Settings(BaseSettings):
         description="LLM provider: gemini, openai, or fake.",
     )
     LLM_MODEL: str = Field(
-        default="gemini-3.8-flash",
+        default="gemini-3.1-flash-lite",
         description="LLM model identifier.",
     )
     GEMINI_API_KEY: str | None = Field(

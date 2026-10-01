@@ -18,14 +18,14 @@ class GeminiClient(LLMClient):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-3.8-flash",
+        model: str = "gemini-3.1-flash-lite",
         client: Any | None = None,
     ) -> None:
         """Initialize the Gemini client adapter.
 
         Args:
             api_key: Gemini API key. If omitted, google-genai attempts ADC/env lookup.
-            model: Gemini model identifier (default: gemini-3.8-flash).
+            model: Gemini model identifier (default: gemini-3.1-flash-lite).
             client: Optional pre-configured genai.Client instance (useful for mocking).
         """
         self.model = model
