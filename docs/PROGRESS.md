@@ -31,6 +31,28 @@ This document tracks execution progress across all backlog tasks, including pull
 | M6-T03  | M6        | Database Models & Alembic Migrations | `feat/alembic-migrations` | #24 | 2 | Done | alembic.ini, env.py, 001_initial migration, upgrade/downgrade test |
 | M6-T04  | M6        | PostgreSQL Run & Step Repository | `feat/pg-memory-store` | #25 | 2 | Done | PostgresMemoryStore, run lifecycle, trace retrieval, session filters |
 | M7-T01  | M7        | FastAPI Application Core & Handlers | `feat/api-core-app` | #26 | 2 | Done | create_app factory, async lifespan, global error handlers for JSON specs |
+| M7-T02  | M7        | API Key Authentication Dependency | `feat/api-auth` | #27 | 2 | Done | X-API-Key validation, /health bypass, 401 error responses |
+| M7-T03  | M7        | Run Management Routes | `feat/api-runs-routes` | #28 | 2 | Done | POST /runs, GET /runs/{run_id}, GET /runs/{run_id}/trace |
+| M7-T04  | M7        | Discovery & Health Routes | `feat/api-tools-health` | #29 | 2 | Done | GET /tools, GET /health verifying live Postgres and Redis connectivity |
+| M8-T01  | M8        | OpenAI SDK Adapter | `feat/openai-adapter` | #30 | 2 | Done | OpenAIClient with function calling, choices parsing, TokenUsage |
+| M8-T02  | M8        | Multi-Provider LLM Factory | `feat/llm-provider-factory` | #31 | 2 | Done | create_llm_client and create_llm_client_from_settings factory |
+| M9-T01  | M9        | Exponential Backoff Retry Wrapper | `feat/llm-retry-wrapper` | #32 | 2 | Done | LLMRetryWrapper with exponential jitter and retryable error classification |
+| M9-T02  | M9        | Redis Sliding-Window Rate Limiter | `feat/redis-rate-limiter` | #33 | 2 | Done | Per-key sliding-window rate limiting dependency |
+| M9-T03  | M9        | Run Execution Timeout Guards | `feat/agent-execution-timeouts` | #34 | 2 | Done | asyncio.timeout guardrail and TIMED_OUT status transition |
+| M10-T01 | M10       | Tool Failure Self-Correction Test | `test/tool-failure-recovery` | #35 | 2 | Done | Multi-turn self-correction and parameter error recovery |
+| M10-T02 | M10       | Prompt Injection Resistance Test | `test/prompt-injection-resistance` | #36 | 2 | Done | Quarantining adversarial injection payloads within Role.TOOL turns |
+| M10-T03 | M10       | Built-in Tools Security Suite | `test/builtin-tools-security` | #37 | 2 | Done | Security unit tests covering AST evasion, SQL injection, path traversal, SSRF |
+| M11-T01 | M11       | Multi-Stage Production Dockerfile | `feat/dockerfile-production` | #38 | 2 | Done | Multi-stage python:3.12-slim build with non-root user and curl healthcheck |
+| M11-T02 | M11       | Docker Compose Environment | `feat/docker-compose-env` | #39 | 2 | Done | Complete docker-compose with postgres, redis, api, volume persistence |
+| M11-T03 | M11       | GitHub Actions CI Pipeline | `feat/github-actions-ci` | #40 | 2 | Done | Lint, test matrix (Python 3.11, 3.12) with Postgres and Redis service containers |
+| M12-T01 | M12       | Demo Database Seed & End-to-End Demo | `feat/demo-script` | #41 | 2 | Done | ANSI SQL seed, multi-tool analytical demo script with offline support |
+| M12-T02 | M12       | AWS Deployment Guide | `docs/aws-deployment-guide` | #42 | 2 | Done | Single-node EC2 production guide with security groups, systemd, Caddy/Nginx TLS |
+| M12-T03 | M12       | Comprehensive Portfolio README | `docs/portfolio-readme` | #43 | 2 | Done | Architecture Mermaid diagram, quickstart, 10-line @tool guide, ADRs summary |
+| M13-T01 | M13       | Real-Infrastructure Test Tier | `fix/real-infrastructure-verification` | #44 | 1 | Done | Opt-in live test tier against real PostgreSQL and Redis |
+| M13-T02 | M13       | Atomic Sliding-Window Rate Limiting | `fix/real-infrastructure-verification` | #44 | 1 | Done | Atomic Lua script eliminating 19/20 concurrency bypass |
+| M13-T03 | M13       | CI Split, Compose Hardening | `fix/real-infrastructure-verification` | #44 | 1 | Done | CI live service job, strict compose API_KEYS, demo persistence |
+| M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, tool role, gemini-2.0-flash default |
+| M13-T05 | M13       | Idempotent Demo Seeding & Compose Auto-Seed | `feat/docker-compose-seed` | #46 | 2 | Done | ON CONFLICT DO NOTHING, scripts/seed.py, compose boot auto-seed |
 
 ---
 
@@ -316,3 +338,16 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #44
 - **Commits**: 1
 - **Notes**: Split CI into a hermetic Python matrix job and a `Test Against Live PostgreSQL and Redis` job that runs the `real_infra` tier against real service containers. Fixed `get_db_session`, which returned without yielding when no session factory was configured and would have surfaced as an opaque `generator didn't yield` RuntimeError; it now raises `ServiceUnavailableError` mapped to HTTP 503, and `lifespan` reuses the `agentkit.db.session` helpers instead of duplicating engine construction. `docker-compose.yml` no longer defaults `API_KEYS` to a known test key. `examples/demo.py` now persists run and step records to real PostgreSQL and Redis by default. Corrected the README and this file's earlier claims that CI exercised the database and cache.
+
+### M13-T04: Gemini Tool Calling & Active Model Standard
+- **Status**: Done
+- **PR**: #45
+- **Commits**: 2
+- **Notes**: Resolved Gemini 2.x/3.x tool-calling incompatibility. Added `thought_signature: bytes | None = None` to neutral `ToolCall` model; captured candidate `thought_signature` from Gemini responses and forwarded it on subsequent conversation turns via `types.Part(function_call=..., thought_signature=...)`; resolved `Role.TOOL` function response names using assistant tool call history with `role="tool"`; standardized active default model to `gemini-2.0-flash` across application config, factory, `.env.example`, and `docker-compose.yml`; ensured `RedisMemoryStore` serializes messages with `mode="json"` for safe base64 bytes encoding.
+
+### M13-T05: Idempotent Demo Seeding & Docker Compose Auto-Seeding
+- **Status**: Done
+- **PR**: #46
+- **Commits**: 2
+- **Notes**: Completed SPEC Section 13 requirement for automated demo database seeding on `docker compose up`. Updated `scripts/seed_demo_db.sql` with `ON CONFLICT (id) DO NOTHING;` to guarantee idempotency across multiple runs; created standalone CLI and programmatic async seeding script `scripts/seed.py`; updated `Dockerfile` to copy `scripts/` to runtime container; updated `docker-compose.yml` migrations service to execute `alembic upgrade head && python scripts/seed.py`; delegated `examples/demo.py` seeding to `scripts.seed.seed_database`; added integration test in `tests/integration/test_seed.py`.
+

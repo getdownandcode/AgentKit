@@ -72,3 +72,39 @@ This log records significant architectural, technical, and design decisions made
   - Dialect-specific and concurrency behaviour is covered rather than assumed; a rate-limit bypass of this class cannot regress unnoticed.
   - `pytest` gains an explicit opt-in for external services, documented in the README and `.env.example`.
   - The live tier truncates the `runs`/`steps` tables and deletes only `session:*` / `ratelimit:*` keys, so it requires a dedicated test database.
+
+---
+
+## ADR-006: Gemini 2.x/3.x Thought Signature Preservation and Active Model Standard
+
+- **Date**: 2026-10-01
+- **Status**: Accepted
+- **Context**: Newer Gemini reasoning models (e.g. Gemini 2.x and 3.x) employ internal reasoning/thinking steps before invoking tools. The Google GenAI API emits an opaque `thought_signature` on candidate `Part` objects containing `function_call`. When returning subsequent conversation turns with `function_response` parts, the API strictly enforces that the prior assistant turn echoes back the exact `thought_signature`. Omitting this signature produces `400 INVALID_ARGUMENT — Function call is missing a thought_signature in functionCall parts`. Additionally, older model identifiers like `gemini-2.5-flash` returned `404 NOT_FOUND` for new users, and `Role.TOOL` messages in the Gemini adapter previously used `role="user"` instead of the official `role="tool"` and mapped tool calls by arbitrary UUID IDs rather than declared function names.
+- **Decision**:
+  - Update `ToolCall` neutral model to include an optional `thought_signature: bytes | None = None` field.
+  - In `GeminiClient`, extract and preserve `thought_signature` from candidate parts and forward it in subsequent assistant tool calls using `types.Part(function_call=..., thought_signature=...)`.
+  - In `GeminiClient`, resolve `Role.TOOL` message identifiers to declared function names via assistant history, and use `types.Content(role="tool", parts=[...])` adhering to official Google GenAI SDK standards.
+  - Update `RedisMemoryStore` to serialize messages via `m.model_dump(mode="json")` so raw bytes fields are transparently base64-encoded and decoded across session persistence.
+  - Standardize the active default Gemini model to `gemini-2.0-flash` across application settings, factory, documentation, `.env.example`, and `docker-compose.yml`.
+- **Consequences**:
+  - Full compatibility with active and future reasoning-capable Gemini models.
+  - Clean multi-turn tool calling without 400 or 404 errors.
+  - Zero disruption to OpenAI or FakeLLM adapters since `thought_signature` defaults to `None`.
+
+---
+
+## ADR-007: Idempotent Automated Demo Database Seeding on Compose Boot
+
+- **Date**: 2026-10-01
+- **Status**: Accepted
+- **Context**: SPEC Section 13 mandates that `docker compose up` must start a working system, run migrations, and seed the demo database (`products` and `orders`). The previous migration service only ran `alembic upgrade head`, requiring manual or separate execution of demo seeds, while `scripts/seed_demo_db.sql` lacked conflict clauses and would crash with primary key collisions if re-executed on subsequent compose restarts.
+- **Decision**:
+  - Add `ON CONFLICT (id) DO NOTHING;` to `INSERT INTO products` and `INSERT INTO orders` in `scripts/seed_demo_db.sql` for strict ANSI-compliant idempotency.
+  - Implement a dedicated `scripts/seed.py` executable that reads `scripts/seed_demo_db.sql` and applies it asynchronously using the configured `DATABASE_URL`.
+  - Update `Dockerfile` to copy `scripts/` into the production runtime container.
+  - Update `docker-compose.yml` migrations command to execute `alembic upgrade head && python scripts/seed.py` prior to the `api` service starting.
+  - Delegate `examples/demo.py` seeding to `scripts.seed.seed_database` to eliminate code duplication.
+- **Consequences**:
+  - `docker compose up` boots directly into a fully seeded, turnkey environment ready for analytical queries via `sql_readonly`.
+  - Database seeding is safely re-entrant across container restarts without data duplication or integrity errors.
+

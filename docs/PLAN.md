@@ -151,3 +151,8 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Trim, cardinality check and insertion execute as one Lua script so concurrent requests cannot exceed the configured limit; non-atomic fallback retained only for deployments that forbid scripting. Regression test in `tests/real/test_redis_real.py`.
 - [x] **M13-T03: CI Split and Documentation Corrections (`.github/workflows/ci.yml`, `README.md`, `docs/DECISIONS.md`)**
   - **Criteria**: CI runs the live tier against its PostgreSQL and Redis service containers; README documents both test tiers; ADR-005 records the rationale; compose requires an explicit `API_KEYS`.
+- [x] **M13-T04: Gemini Tool Calling & Active Model Fix (`agentkit/llm/gemini.py`, `agentkit/tools/models.py`)**
+  - **Criteria**: Added `thought_signature: bytes | None` to `ToolCall`; preserved and forwarded `thought_signature` across conversation turns to support modern Gemini 2.x/3.x reasoning models; mapped tool responses by declared function name with `role="tool"`; standardized default model identifier to active `gemini-2.0-flash`.
+- [x] **M13-T05: Idempotent Demo Seeding & Docker Compose Auto-Seeding (`scripts/`, `docker-compose.yml`, `Dockerfile`)**
+  - **Criteria**: Made `scripts/seed_demo_db.sql` fully idempotent using `ON CONFLICT (id) DO NOTHING;`; created standalone executable `scripts/seed.py`; updated `Dockerfile` to copy `scripts/`; updated compose migrations service to automatically execute `python scripts/seed.py` on startup; added integration test `tests/integration/test_seed.py`.
+
