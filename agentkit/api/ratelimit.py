@@ -10,7 +10,7 @@ from typing import cast
 
 from fastapi import Depends
 from redis.asyncio import Redis
-from redis.exceptions import ResponseError
+from redis.exceptions import ResponseError, WatchError
 
 from agentkit.api.auth import get_current_settings, verify_api_key
 from agentkit.api.deps import get_redis_client
@@ -56,6 +56,10 @@ redis.call('ZADD', key, now, member)
 redis.call('EXPIRE', key, key_ttl)
 return {1, 0}
 """
+
+#: Retries for the WATCH/MULTI fallback when concurrent writers keep invalidating the watch.
+#: Only reached on Redis deployments without scripting support.
+_WATCH_MAX_RETRIES = 5
 
 
 class RateLimiter:
@@ -180,23 +184,48 @@ class RateLimiter:
         member: str,
         key_ttl: int,
     ) -> tuple[bool, int]:
-        """Best-effort sliding-window check for servers without scripting support."""
-        pipe = redis_client.pipeline(transaction=True)
-        pipe.zremrangebyscore(redis_key, "-inf", now - window)
-        pipe.zcard(redis_key)
-        results = await pipe.execute()
-        if int(results[1]) >= limit:
-            oldest = await redis_client.zrange(redis_key, 0, 0, withscores=True)
-            retry_after = (
-                max(1, math.ceil(float(oldest[0][1]) + window - now)) if oldest else int(window)
-            )
-            return False, retry_after
+        """Best-effort sliding-window check for servers without scripting support.
 
-        pipe = redis_client.pipeline(transaction=True)
-        pipe.zadd(redis_key, {member: now})
-        pipe.expire(redis_key, key_ttl)
-        await pipe.execute()
-        return True, 0
+        An earlier version trimmed and counted in one transaction, then inserted in a second.
+        That second round trip leaves a gap in which concurrent requests all read the same
+        pre-insert cardinality and are admitted together, so a parallel burst could exceed the
+        quota. WATCH/MULTI/EXEC closes the gap: the whole read-decide-write cycle aborts and
+        retries whenever another client modifies the key in between.
+        """
+        for _ in range(_WATCH_MAX_RETRIES):
+            async with redis_client.pipeline(transaction=True) as pipe:
+                try:
+                    await pipe.watch(redis_key)
+                    await pipe.zremrangebyscore(redis_key, "-inf", now - window)
+                    count = await pipe.zcard(redis_key)
+
+                    if int(count) >= limit:
+                        oldest = await pipe.zrange(redis_key, 0, 0, withscores=True)
+                        await pipe.reset()
+                        retry_after = (
+                            max(1, math.ceil(float(oldest[0][1]) + window - now))
+                            if oldest
+                            else int(window)
+                        )
+                        return False, retry_after
+
+                    pipe.multi()
+                    pipe.zadd(redis_key, {member: now})
+                    pipe.expire(redis_key, key_ttl)
+                    await pipe.execute()
+                    return True, 0
+                except WatchError:
+                    # Another client changed the window between WATCH and EXEC; re-read and retry.
+                    continue
+
+        # Contention never settled. Denying is the safe direction for a limiter: a false
+        # reject costs one request, a false admit lets a client exceed its quota.
+        logger.warning(
+            "Rate limit check for key %s hit %d watch retries under contention; denying request.",
+            redis_key[:8] + "...",
+            _WATCH_MAX_RETRIES,
+        )
+        return False, max(1, math.ceil(window))
 
     async def __call__(
         self,

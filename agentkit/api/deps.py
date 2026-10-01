@@ -18,6 +18,7 @@ from agentkit.core.trace import InMemoryTraceSink, TraceSink
 from agentkit.llm.base import LLMClient
 from agentkit.llm.factory import create_llm_client_from_settings
 from agentkit.llm.fake import FakeLLMClient
+from agentkit.llm.retry import RetryingLLMClient
 from agentkit.memory.base import InMemoryMemoryStore, MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
 from agentkit.memory.redis_store import RedisMemoryStore
@@ -125,18 +126,35 @@ def get_llm_client(
     request: Request,
     settings: Settings = Depends(get_current_settings),
 ) -> LLMClient:
-    """Resolve configured LLM client."""
-    if hasattr(request.app.state, "llm_client") and request.app.state.llm_client is not None:
-        client: LLMClient = request.app.state.llm_client
-        return client
+    """Resolve the configured LLM client, wrapped with transient-error retries.
+
+    An explicit ``app.state.llm_client`` override always wins so tests and deployments can
+    substitute a client. Otherwise the provider is built from settings and any failure is
+    surfaced as a 503: falling back to a fake client would answer a misconfigured
+    deployment with scripted text and HTTP 200 instead of surfacing the misconfiguration.
+    """
+    override: LLMClient | None = getattr(request.app.state, "llm_client", None)
+    if override is not None:
+        return override
+
+    if settings.LLM_PROVIDER.strip().lower() == "fake":
+        return FakeLLMClient()
 
     try:
-        return create_llm_client_from_settings(settings)
+        client = create_llm_client_from_settings(settings)
     except Exception as exc:
-        logger.warning(
-            "Failed to initialize configured LLM client (%s); falling back to FakeLLMClient", exc
-        )
-        return FakeLLMClient()
+        logger.error("Failed to initialize LLM provider %s: %s", settings.LLM_PROVIDER, exc)
+        raise ServiceUnavailableError(
+            "llm",
+            f"LLM provider '{settings.LLM_PROVIDER}' could not be initialized.",
+        ) from exc
+
+    return RetryingLLMClient(
+        client,
+        max_retries=settings.LLM_MAX_RETRIES,
+        base_delay=settings.LLM_RETRY_BASE_DELAY_S,
+        max_delay=settings.LLM_RETRY_MAX_DELAY_S,
+    )
 
 
 def get_agent(
@@ -147,10 +165,15 @@ def get_agent(
     memory: MemoryStore = Depends(get_memory_store),
     trace: TraceSink = Depends(get_trace_sink),
 ) -> Agent:
-    """Assemble configured Agent instance with all runtime dependencies."""
-    if hasattr(request.app.state, "agent") and request.app.state.agent is not None:
-        agent: Agent = request.app.state.agent
-        return agent
+    """Assemble a configured Agent from the currently resolved dependencies.
+
+    The agent is rebuilt per request rather than memoized on ``app.state``: caching the first
+    assembled instance would pin every later request to that request's LLM client, registry,
+    memory store and trace sink, silently ignoring any later override or settings change.
+    """
+    override: Agent | None = getattr(request.app.state, "agent_override", None)
+    if override is not None:
+        return override
 
     config = AgentConfig(
         max_steps=settings.MAX_STEPS,

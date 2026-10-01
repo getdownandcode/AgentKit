@@ -1,15 +1,18 @@
 """Read-only SQL tool with strict single-SELECT validation and DDL/DML rejection."""
 
 import asyncio
+import logging
 import re
 from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from agentkit.config import get_settings
 from agentkit.tools.registry import tool
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ROW_LIMIT = 50
 DEFAULT_STATEMENT_TIMEOUT_S = 10.0
@@ -45,16 +48,42 @@ _KEYWORD_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+#: A '#' that is not the start of a JSON path operator (#>, #>>, #-), i.e. a comment marker.
+_BARE_HASH_REGEX = re.compile(r"#(?![>~-])")
+
+#: A row-locking clause. LIMIT cannot simply be appended after one of these, so such
+#: statements take the subquery-wrap fallback instead.
+_LOCKING_CLAUSE_REGEX = re.compile(
+    r"\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b",
+    re.IGNORECASE,
+)
+
+#: A clause that already bounds the statement's own output. Such statements are executed
+#: untouched so a caller-supplied bound is never widened.
+_EXISTING_BOUND_REGEX = re.compile(
+    r"(\blimit\b|\bfetch\s+first\b)",
+    re.IGNORECASE,
+)
+
+#: Process-wide engine, created on first use. Connection pools are expensive to rebuild and
+#: are safe to share, but the engine is still injectable per call so tests and alternative
+#: deployments can supply their own without mutating module state.
 _readonly_engine: AsyncEngine | None = None
 
 
 def get_readonly_engine() -> AsyncEngine:
-    """Return singleton read-only SQLAlchemy AsyncEngine."""
+    """Return the shared read-only SQLAlchemy AsyncEngine, creating it on first use."""
     global _readonly_engine
     if _readonly_engine is None:
         settings = get_settings()
-        _readonly_engine = create_async_engine(settings.DATABASE_URL)
+        _readonly_engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
     return _readonly_engine
+
+
+def set_readonly_engine(engine: AsyncEngine | None) -> None:
+    """Override or clear the shared read-only engine (dependency injection seam for tests)."""
+    global _readonly_engine
+    _readonly_engine = engine
 
 
 def validate_sql_query(query: str) -> str:
@@ -74,15 +103,30 @@ def validate_sql_query(query: str) -> str:
     if not stripped:
         raise ValueError("Empty or whitespace-only SQL query.")
 
-    # Reject comments that could hide payload structure
-    if "--" in stripped or "/*" in stripped or "*/" in stripped or "#" in stripped:
+    # Reject comments that could hide payload structure. The scan runs on the query with
+    # string literals and quoted identifiers blanked out, so comment markers that are merely
+    # data (WHERE note = 'x -- y', or a '#' inside a literal) do not cause false rejections.
+    # A marker can only be hidden inside quotes when it really is inside a literal, in which
+    # case the database parses it as data too. A bare '#' is allowed when it begins a
+    # PostgreSQL JSON path operator (#>, #>>, #-); those are legitimate in a read-only
+    # projection.
+    masked_structure = _mask_literals(stripped)
+    if (
+        "--" in masked_structure
+        or "/*" in masked_structure
+        or "*/" in masked_structure
+        or _BARE_HASH_REGEX.search(masked_structure)
+    ):
         raise ValueError(
             "Comments are not permitted in SQL queries to prevent security circumvention."
         )
 
-    # Strip single trailing semicolon if present
-    cleaned = stripped.rstrip(";").strip()
-    if ";" in cleaned:
+    # Strip a single trailing semicolon if present. rstrip(";") would also swallow the
+    # repeated separators that signal a stacked-statement payload. The multi-statement scan
+    # likewise runs on the masked structure so a ';' inside a string literal is data, not a
+    # statement separator; a real separator outside any literal is still caught.
+    cleaned = stripped[:-1].strip() if stripped.endswith(";") else stripped
+    if ";" in _mask_literals(cleaned):
         raise ValueError("Multiple SQL statements separated by semicolons are strictly prohibited.")
 
     # Validate statement header: must begin with SELECT or WITH
@@ -90,13 +134,63 @@ def validate_sql_query(query: str) -> str:
     if not (lower.startswith("select") or lower.startswith("with")):
         raise ValueError("Only SELECT statements are permitted.")
 
-    # Check for forbidden DDL, DML, or administrative keywords
-    matches = _KEYWORD_REGEX.findall(cleaned)
+    # Check for forbidden DDL, DML, or administrative keywords. Scanning the query with its
+    # string literals and quoted identifiers blanked out avoids rejecting harmless queries
+    # like SELECT * FROM events WHERE action = 'insert', where the keyword only appears as
+    # data. The literals are still covered by the single-statement check above, since an
+    # embedded ';' inside a literal cannot be resolved without full SQL parsing.
+    matches = _KEYWORD_REGEX.findall(_mask_literals(cleaned))
     if matches:
         prohibited = sorted({m.upper() for m in matches})
         raise ValueError(f"Query contains prohibited SQL keyword(s): {', '.join(prohibited)}")
 
     return cleaned
+
+
+def _mask_literals(sql: str) -> str:
+    """Replace string literals and quoted identifiers with placeholders.
+
+    Keeps the keyword scan focused on SQL structure instead of matching words that merely
+    appear inside a quoted value or a quoted column name.
+    """
+    masked: list[str] = []
+    index = 0
+    length = len(sql)
+
+    while index < length:
+        char = sql[index]
+
+        if char == "'":
+            masked.append(" ")
+            index += 1
+            while index < length:
+                if sql[index] == "'":
+                    # Doubled quote is an escaped quote inside the literal, not its end.
+                    if index + 1 < length and sql[index + 1] == "'":
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+
+        if char == '"':
+            masked.append(" ")
+            index += 1
+            while index < length:
+                if sql[index] == '"':
+                    if index + 1 < length and sql[index + 1] == '"':
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+
+        masked.append(char)
+        index += 1
+
+    return "".join(masked)
 
 
 def format_rows_as_markdown(columns: Sequence[str], rows: Sequence[Any]) -> str:
@@ -121,6 +215,11 @@ async def execute_sql_query(
 ) -> str:
     """Validate and execute a read-only SQL query, returning a formatted markdown table.
 
+    The row limit is applied in SQL, not just client-side. ``fetchmany(row_limit)`` alone still
+    makes the database plan and execute the full scan, so a query over a large table burns
+    server resources even though only a handful of rows are returned; the client-side
+    ``asyncio.timeout`` cancels late and leaves the work already done.
+
     Args:
         query: SQL SELECT statement.
         engine: Optional custom AsyncEngine override (e.g. for testing).
@@ -135,10 +234,75 @@ async def execute_sql_query(
 
     async with asyncio.timeout(timeout_s):
         async with target_engine.connect() as conn:
-            cursor = await conn.execute(text(clean_sql))
+            await _apply_statement_timeout(conn, timeout_s)
+            cursor = await conn.execute(text(_apply_row_limit(clean_sql, row_limit)))
             columns = list(cursor.keys())
             rows = cursor.fetchmany(row_limit)
             return format_rows_as_markdown(columns, rows)
+
+
+async def _apply_statement_timeout(conn: AsyncConnection, timeout_s: float) -> None:
+    """Push the timeout down to the database where the dialect supports it.
+
+    The client-side ``asyncio.timeout`` only cancels the wait; the server keeps running the
+    statement. ``statement_timeout`` aborts it at the source. SQLite has no equivalent, so the
+    client-side timeout remains the only guard there.
+    """
+    dialect = conn.dialect.name
+    if dialect not in ("postgresql", "mysql", "mariadb"):
+        return
+
+    try:
+        if dialect == "postgresql":
+            await conn.execute(text(f"SET LOCAL statement_timeout = {int(timeout_s * 1000)}"))
+        else:
+            # MAX_EXECUTION_TIME is in milliseconds and applies session-wide to subsequent
+            # top-level SELECT statements, unlike SET STATEMENT ... FOR which would only
+            # cover the single statement it prefixes.
+            await conn.execute(text(f"SET SESSION MAX_EXECUTION_TIME = {int(timeout_s * 1000)}"))
+    except Exception as exc:
+        # A restricted role may lack permission to set this; the client-side timeout and the
+        # in-SQL row limit still bound the work, so this must not fail the query.
+        logger.warning("Could not apply server-side statement timeout: %s", exc)
+
+
+def _top_level_tail(masked_sql: str) -> str:
+    """Return the trailing top-level clause of a masked statement.
+
+    Clause keywords are only meaningful at parenthesis depth zero: a LIMIT inside a subquery
+    does not bound the outer statement. Parenthesis counting on the literal-masked text is
+    exact for real queries, since quoted parentheses are already blanked out.
+    """
+    depth = 0
+    tail_start = 0
+    for index, char in enumerate(masked_sql):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth <= 0:
+                depth = 0
+                tail_start = index + 1
+    return masked_sql[tail_start:]
+
+
+def _apply_row_limit(sql: str, row_limit: int) -> str:
+    """Bound the statement's output in SQL, preferring an appended LIMIT.
+
+    Appending ``LIMIT`` leaves an already-valid statement untouched in shape, so constructs
+    like duplicate output column names in a JOIN keep working exactly as written. Only two
+    cases need different handling, both detected on the trailing top-level clause:
+
+    - the statement already bounds itself (LIMIT / FETCH FIRST): executed untouched;
+    - the statement ends in a row-locking clause (FOR UPDATE / FOR SHARE), after which a
+      LIMIT cannot legally appear: wrapped in a limited subquery instead.
+    """
+    tail = _top_level_tail(_mask_literals(sql))
+    if _EXISTING_BOUND_REGEX.search(tail):
+        return sql
+    if _LOCKING_CLAUSE_REGEX.search(tail):
+        return f"SELECT * FROM ({sql}) AS agentkit_limited_query LIMIT {int(row_limit)}"
+    return f"{sql} LIMIT {int(row_limit)}"
 
 
 @tool

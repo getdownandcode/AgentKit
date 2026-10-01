@@ -108,3 +108,58 @@ This log records significant architectural, technical, and design decisions made
   - `docker compose up` boots directly into a fully seeded, turnkey environment ready for analytical queries via `sql_readonly`.
   - Database seeding is safely re-entrant across container restarts without data duplication or integrity errors.
 
+
+---
+
+## ADR-008: Fail-Closed Configuration and Dependency Resolution
+
+- **Date**: 2026-10-01
+- **Status**: Accepted
+- **Context**: A whole-project audit found several paths where a misconfiguration or a transient fault was silently converted into a working-looking success. `Settings.API_KEYS` defaulted to `ak_test_key_12345`, a key published in the repository, so any deployment without a `.env` came up openly accessible. `get_llm_client` caught every exception from the provider factory and returned `FakeLLMClient`, so a missing `GEMINI_API_KEY` produced HTTP 200 with scripted text instead of a 503. `get_agent` memoized the first assembled `Agent` on `app.state`, so after the first request every later request reused that request's LLM client, registry, memory store and trace sink, ignoring any override made afterwards. `RetryingLLMClient` existed with tests but was referenced nowhere in the request path, leaving production with no retry on transient provider failures. `TieredMemoryStore` forwarded only the run methods, so duck-typed `get_run_trace` detection in the trace endpoint fell through to a trace sink that may hold no rows.
+- **Decision**:
+  - Make `API_KEYS` required with no default; `Settings` validation rejects an empty or whitespace-only value.
+  - Remove the `FakeLLMClient` fallback from the request path. Provider construction failure raises `ServiceUnavailableError` (503). `LLM_PROVIDER=fake` remains an explicit opt-in and short-circuits before the factory.
+  - Wire `RetryingLLMClient` into `get_llm_client`, configurable through `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_DELAY_S` and `LLM_RETRY_MAX_DELAY_S`. An explicit `app.state.llm_client` override still wins and is not wrapped, keeping tests deterministic.
+  - Build the `Agent` per request from resolved dependencies instead of caching it. An explicit `app.state.agent_override` is still honoured.
+  - Forward `get_run_trace` and `list_runs` through `TieredMemoryStore` to the underlying run store, returning empty lists when the run store does not support them.
+- **Consequences**:
+  - A misconfigured deployment fails loudly at startup or on the first request instead of serving fake or unauthenticated traffic.
+  - No request is served by a dependency graph assembled for an earlier request.
+  - Transient provider failures (429/5xx/network) are retried with exponential backoff and jitter; authentication and other 4xx failures are not.
+  - The test suite seeds a fixed `API_KEYS` before importing `agentkit.api.main`, whose module-level `create_app()` would otherwise fail validation.
+
+---
+
+## ADR-009: Post-Connect SSRF Verification and Bounded Resource Use in Tools
+
+- **Date**: 2026-10-01
+- **Status**: Accepted
+- **Context**: `http_fetch` resolved the hostname, checked the resolved addresses, then let `httpx` resolve the hostname again when connecting. That time-of-check/time-of-use gap lets a short-TTL DNS answer hand back a public address during validation and a loopback or `169.254.169.254` address during connection. DNS resolution was synchronous `socket.getaddrinfo` called directly from async code, stalling the event loop, and the full response body was buffered before being truncated to `max_chars`, so a large payload could exhaust memory. Separately, `sql_readonly` applied `fetchmany(row_limit)` client-side only, which still makes the database plan and execute the full scan, and its keyword scan rejected any query containing a write keyword even inside a string literal, while its bare `#` check rejected the legitimate PostgreSQL JSON operators `#>` and `#-`.
+- **Decision**:
+  - Resolve DNS via `asyncio.to_thread` and reuse the resolved addresses for both validation and the connection decision.
+  - After connecting, read `server_addr` from the response's network stream and reject the request if the peer is not among the validated addresses.
+  - Stream the body with an explicit byte budget instead of buffering then slicing.
+  - Apply the row limit in SQL by wrapping an unbounded statement, leaving a caller-supplied top-level `LIMIT` untouched, and push `statement_timeout` to PostgreSQL where the dialect supports it.
+  - Mask string literals and quoted identifiers before the keyword scan, and treat `#` as a comment marker only when it does not begin a JSON path operator.
+- **Consequences**:
+  - DNS rebinding to a private or metadata address is refused after the connection is established, not merely before it.
+  - No blocking DNS on the event loop, and response memory is bounded regardless of `max_chars`.
+  - Legitimate read-only queries that merely mention a write keyword as data, or use JSON path operators, are accepted; write statements remain blocked.
+
+---
+
+## ADR-010: Atomic Fallbacks and Domain-Error Boundaries
+
+- **Date**: 2026-10-01
+- **Status**: Accepted
+- **Context**: Two fallbacks reintroduced the exact races their primary paths had been written to eliminate, and several error boundaries leaked raw SDK exceptions. The rate limiter's non-scripting fallback trimmed and counted in one pipeline then inserted in a second, so concurrent requests between the two observed the same pre-insert cardinality and were admitted together. In both LLM adapters the `try` block wrapped only the SDK call, so response parsing escaped as raw provider exceptions: reading `raw_response.text` raises on a blocked prompt, an empty `choices`/`candidates` list raised `IndexError`, and malformed tool-call JSON was rewritten to `{"raw": ...}`, which later failed argument validation with a misleading "missing required field" message. `RetryingLLMClient.__getattr__` recursed infinitely when `_client` was absent, and `/health` echoed `str(exc)` from SQLAlchemy and Redis on an unauthenticated endpoint.
+- **Decision**:
+  - Implement the non-scripting rate limit fallback with `WATCH`/`MULTI`/`EXEC` optimistic locking, denying the request if contention never settles within the retry budget.
+  - Wrap response parsing in both adapters inside the error boundary, re-raising domain errors unchanged and mapping anything else to `LLMProviderError`. Report malformed tool-call JSON as such instead of substituting a placeholder object.
+  - Use full UUIDs for generated `tool_call_id` values; a truncated 32-bit id risks collisions within a long session.
+  - Guard `RetryingLLMClient.__getattr__` against re-entering itself when `_client` was never assigned.
+  - Return fixed client-facing strings from `/health` and log the underlying driver error instead.
+- **Consequences**:
+  - The fallback enforces the documented limit under concurrency, erring toward denial where it cannot decide.
+  - Every provider fault is matchable on `LLMProviderError`, so HTTP status mapping stays correct for malformed as well as failed responses.
+  - The unauthenticated health endpoint no longer discloses internal hostnames, ports or database names.

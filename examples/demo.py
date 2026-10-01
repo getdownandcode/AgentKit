@@ -144,15 +144,23 @@ def build_fake_llm() -> LLMClient:
 
 
 def build_llm(offline: bool, provider: str) -> LLMClient:
-    """Resolve the LLM client, degrading to the scripted fake when no key is present."""
+    """Resolve the LLM client for the demo.
+
+    Offline execution has to be requested with ``--offline``. A missing API key is otherwise
+    an error rather than a silent downgrade to the scripted client, which would otherwise
+    print a canned answer that looks like a real run.
+    """
     if offline or provider == "fake":
         return build_fake_llm()
 
     settings = get_settings()
     key_present = settings.GEMINI_API_KEY if provider == "gemini" else settings.OPENAI_API_KEY
     if not key_present:
-        logger.warning("No API key for provider '%s'; falling back to FakeLLMClient.", provider)
-        return build_fake_llm()
+        raise SystemExit(
+            f"No API key configured for provider '{provider}'. "
+            f"Set {'GEMINI_API_KEY' if provider == 'gemini' else 'OPENAI_API_KEY'}, "
+            "or pass --offline to run against the scripted client."
+        )
 
     return create_llm_client(provider)
 
@@ -173,8 +181,9 @@ async def run_demo(
     Returns:
         The agent's final answer string.
     """
-    settings = get_settings()
-    target_db_url = IN_MEMORY_DB_URL if offline else (db_url or settings.DATABASE_URL)
+    # Settings are only read on the live path. Offline mode deliberately avoids
+    # get_settings() so the demo runs with no API keys and no services at all.
+    target_db_url = IN_MEMORY_DB_URL if offline else (db_url or get_settings().DATABASE_URL)
 
     query_engine = create_async_engine(target_db_url, pool_pre_ping=True)
     await seed_demo_database(query_engine)

@@ -49,6 +49,22 @@ class Settings(BaseSettings):
         default=None,
         description="External search API key (Tavily/SerpAPI).",
     )
+    LLM_MAX_RETRIES: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Retry attempts for transient LLM provider failures (429/5xx/network).",
+    )
+    LLM_RETRY_BASE_DELAY_S: float = Field(
+        default=0.5,
+        gt=0,
+        description="Base delay in seconds for exponential LLM retry backoff.",
+    )
+    LLM_RETRY_MAX_DELAY_S: float = Field(
+        default=10.0,
+        gt=0,
+        description="Maximum delay in seconds between LLM retry attempts.",
+    )
     FILE_TOOL_BASE_DIR: str = Field(
         default="/tmp/agentkit_sandbox",
         description="Base directory for sandboxed file reading operations.",
@@ -56,8 +72,8 @@ class Settings(BaseSettings):
 
     # Security & API Authentication
     API_KEYS: str = Field(
-        default="ak_test_key_12345",
-        description="Comma-separated list of valid client API keys.",
+        default="",
+        description="Comma-separated list of valid client API keys. Must be set explicitly.",
     )
     RATE_LIMIT_PER_MIN: int = Field(
         default=30,
@@ -95,10 +111,17 @@ class Settings(BaseSettings):
     @field_validator("API_KEYS")
     @classmethod
     def validate_api_keys(cls, v: str) -> str:
-        """Ensure API keys are not empty."""
+        """Reject blank or placeholder keys so a deployment cannot start unauthenticated.
+
+        The default is intentionally empty: starting with a key published in the repository
+        would expose any deployment that forgets to configure its own.
+        """
         cleaned = v.strip()
         if not cleaned:
-            raise ValueError("API_KEYS must not be empty")
+            raise ValueError(
+                "API_KEYS must be set to a comma-separated list of client API keys. "
+                "AgentKit refuses to start without explicit authentication credentials."
+            )
         return cleaned
 
     @property
