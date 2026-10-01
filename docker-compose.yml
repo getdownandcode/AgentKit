@@ -43,7 +43,7 @@ services:
       dockerfile: Dockerfile
     container_name: agentkit-migrations
     restart: "no"
-    command: ["alembic", "upgrade", "head"]
+    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py"]
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,7 +1,5 @@
 """Integration tests for demo database seeding script and idempotency."""
 
-from pathlib import Path
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine

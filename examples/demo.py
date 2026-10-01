@@ -27,10 +27,8 @@ import argparse
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 from redis.asyncio import Redis
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -71,16 +69,9 @@ class DemoResources:
 
 async def seed_demo_database(engine: AsyncEngine) -> None:
     """Apply scripts/seed_demo_db.sql, creating products and orders tables."""
-    seed_path = Path(__file__).parents[1] / "scripts" / "seed_demo_db.sql"
-    if not seed_path.exists():
-        raise FileNotFoundError(f"Seed script not found at {seed_path}")
+    from scripts.seed import seed_database
 
-    statements = [s.strip() for s in seed_path.read_text(encoding="utf-8").split(";") if s.strip()]
-    async with engine.begin() as conn:
-        for stmt in statements:
-            await conn.execute(text(stmt))
-
-    logger.info("Seeded products and orders into the demo database.")
+    await seed_database(engine)
 
 
 async def build_persistence(db_url: str, offline: bool) -> DemoResources:
