@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentkit.api.auth import get_current_settings
 from agentkit.config import Settings
 from agentkit.core.agent import Agent, AgentConfig
+from agentkit.core.errors import ServiceUnavailableError
 from agentkit.core.pg_trace import PostgresTraceSink
 from agentkit.core.trace import InMemoryTraceSink, TraceSink
 from agentkit.llm.base import LLMClient
@@ -31,21 +32,27 @@ from agentkit.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 
-def get_session_factory(
-    request: Request,
-) -> async_sessionmaker[AsyncSession] | None:
+def get_session_factory(request: Request) -> async_sessionmaker[AsyncSession] | None:
     """Retrieve database session factory from app state."""
     return getattr(request.app.state, "session_factory", None)
 
 
 async def get_db_session(
-    request: Request,
+    factory: async_sessionmaker[AsyncSession] | None = Depends(get_session_factory),
 ) -> AsyncIterator[AsyncSession]:
-    """Provide a scoped database session."""
-    factory = get_session_factory(request)
-    if factory is not None:
-        async with factory() as session:
-            yield session
+    """Yield a scoped database session.
+
+    Fails explicitly when the application has no session factory. Returning without
+    yielding would leave FastAPI's dependency solver with an exhausted generator and
+    surface as an opaque ``generator didn't yield`` RuntimeError at request time.
+    """
+    if factory is None:
+        raise ServiceUnavailableError(
+            "database",
+            "Database is not configured. The session factory is absent from application state.",
+        )
+    async with factory() as session:
+        yield session
 
 
 def get_redis_client(request: Request) -> Redis | None:

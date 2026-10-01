@@ -153,6 +153,17 @@ class RunNotFoundError(AgentKitError):
         self.run_id = str(run_id)
 
 
+class ServiceUnavailableError(AgentKitError):
+    """Raised when a required backing service is not configured or not reachable."""
+
+    def __init__(self, service: str, message: str | None = None) -> None:
+        super().__init__(
+            message or f"Service '{service}' is unavailable.",
+            code="SERVICE_UNAVAILABLE",
+        )
+        self.service = service
+
+
 # Aliases for convenience
 ToolNotFoundError = ToolNotFound
 LLMRateLimitError = RateLimitExceededError
