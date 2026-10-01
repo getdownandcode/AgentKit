@@ -71,12 +71,13 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
+      - RUN_TIMEOUT_S=${RUN_TIMEOUT_S:-60}
       # No default key. An unset or empty API_KEYS leaves the api service to fail at
       # startup on Settings validation rather than running with a published key.
       # Compose keeps ${VAR:-} so `down`, `ps` and `logs` still work without it.
       - API_KEYS=${API_KEYS:-}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
-      - LLM_MODEL=${LLM_MODEL:-gemini-3.7-flash}
+      - LLM_MODEL=${LLM_MODEL:-gemini-3.8-flash}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
