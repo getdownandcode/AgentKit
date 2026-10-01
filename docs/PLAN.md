@@ -141,3 +141,13 @@ This backlog contains granular, focused tasks (15–30 minutes each) structured 
   - **Criteria**: Step-by-step documentation for deploying AgentKit on a single AWS EC2 instance using Docker Compose, including security groups, systemd service configuration, environment secrets management, and SSL termination via Caddy/Nginx.
 - [x] **M12-T03: Comprehensive Portfolio README (`README.md`)**
   - **Criteria**: Complete README featuring overview, architecture Mermaid diagram, quickstart guide, 10-line `@tool` tutorial, provider extension guide, sample trace output, design decisions (ADRs summary), and limitations/future roadmap.
+
+---
+
+## Milestone 13: Real Infrastructure Verification
+- [x] **M13-T01: Real-Infrastructure Test Tier (`tests/conftest.py`, `tests/real/`)**
+  - **Criteria**: Opt-in `real_infra` suite running `PostgresMemoryStore`, `PostgresTraceSink`, `RedisMemoryStore` and the rate limiter against live PostgreSQL and Redis; verifies native `uuid`/`json`/`timestamptz` columns, foreign-key cascade deletes, real TTL expiry, and the full FastAPI lifespan end to end. Applies Alembic migrations through the real dialect and skips unless `AGENTKIT_REAL_INFRA=1`.
+- [x] **M13-T02: Atomic Sliding-Window Rate Limiting (`agentkit/api/ratelimit.py`)**
+  - **Criteria**: Trim, cardinality check and insertion execute as one Lua script so concurrent requests cannot exceed the configured limit; non-atomic fallback retained only for deployments that forbid scripting. Regression test in `tests/real/test_redis_real.py`.
+- [x] **M13-T03: CI Split and Documentation Corrections (`.github/workflows/ci.yml`, `README.md`, `docs/DECISIONS.md`)**
+  - **Criteria**: CI runs the live tier against its PostgreSQL and Redis service containers; README documents both test tiers; ADR-005 records the rationale; compose requires an explicit `API_KEYS`.
