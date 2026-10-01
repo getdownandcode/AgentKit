@@ -138,16 +138,26 @@ def get_llm_client(
     request: Request,
     settings: Settings = Depends(get_current_settings),
 ) -> LLMClient:
-    """Resolve configured LLM client.
+    """Resolve the configured LLM client.
 
-    Instantiates the configured provider from settings. Explicit test overrides
-    can be supplied via request.app.state.llm_client.
+    Instantiates the configured provider from settings, which also applies the
+    configured transient-error retry policy. Explicit test overrides can be supplied
+    via request.app.state.llm_client. A provider construction failure is surfaced as a
+    503: falling back to a scripted client would answer a misconfigured deployment with
+    fake text and HTTP 200 instead of surfacing the misconfiguration.
     """
-    if hasattr(request.app.state, "llm_client") and request.app.state.llm_client is not None:
-        client: LLMClient = request.app.state.llm_client
-        return client
+    override: LLMClient | None = getattr(request.app.state, "llm_client", None)
+    if override is not None:
+        return override
 
-    return create_llm_client_from_settings(settings)
+    try:
+        return create_llm_client_from_settings(settings)
+    except Exception as exc:
+        logger.error("Failed to initialize LLM provider %s: %s", settings.LLM_PROVIDER, exc)
+        raise ServiceUnavailableError(
+            "llm",
+            f"LLM provider '{settings.LLM_PROVIDER}' could not be initialized.",
+        ) from exc
 
 
 def get_agent(
@@ -158,10 +168,15 @@ def get_agent(
     memory: MemoryStore = Depends(get_memory_store),
     trace: TraceSink = Depends(get_trace_sink),
 ) -> Agent:
-    """Assemble configured Agent instance with all runtime dependencies."""
-    if hasattr(request.app.state, "agent") and request.app.state.agent is not None:
-        agent: Agent = request.app.state.agent
-        return agent
+    """Assemble a configured Agent from the currently resolved dependencies.
+
+    The agent is rebuilt per request rather than memoized on ``app.state``: caching the first
+    assembled instance would pin every later request to that request's LLM client, registry,
+    memory store and trace sink, silently ignoring any later override or settings change.
+    """
+    override: Agent | None = getattr(request.app.state, "agent_override", None)
+    if override is not None:
+        return override
 
     config = AgentConfig(
         max_steps=settings.MAX_STEPS,

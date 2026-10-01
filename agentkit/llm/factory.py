@@ -76,10 +76,12 @@ def create_llm_client_from_settings(settings: Settings) -> LLMClient:
         model=settings.LLM_MODEL,
     )
 
-    if provider in ("gemini", "openai") and settings.MAX_RETRIES > 0:
+    if provider in ("gemini", "openai") and settings.LLM_MAX_RETRIES > 0:
         return RetryingLLMClient(
             client=client,
-            max_retries=settings.MAX_RETRIES,
+            max_retries=settings.LLM_MAX_RETRIES,
+            base_delay=settings.LLM_RETRY_BASE_DELAY_S,
+            max_delay=settings.LLM_RETRY_MAX_DELAY_S,
         )
 
     return client

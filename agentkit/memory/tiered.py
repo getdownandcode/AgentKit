@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from agentkit.core.trace import StepTrace
 from agentkit.core.types import RunStatus
 from agentkit.llm.base import Message
 from agentkit.memory.base import MemoryStore, RunRecord, SessionStore
@@ -74,3 +75,26 @@ class TieredMemoryStore(MemoryStore):
             if isinstance(record, RunRecord):
                 return record
         return None
+
+    async def get_run_trace(self, run_id: str) -> list[StepTrace]:
+        """Retrieve execution steps for a run from the run store.
+
+        Forwarded so callers relying on duck-typed ``get_run_trace`` detection (such as the
+        trace endpoint) read the durable ``steps`` table instead of silently falling back to a
+        trace sink that may hold no rows.
+        """
+        getter = getattr(self.run_store, "get_run_trace", None)
+        if getter is None:
+            return []
+        return list(await getter(run_id))
+
+    async def list_runs(
+        self,
+        session_id: str | None = None,
+        limit: int = 50,
+    ) -> list[RunRecord]:
+        """List historical runs from the run store, optionally scoped to a session."""
+        lister = getattr(self.run_store, "list_runs", None)
+        if lister is None:
+            return []
+        return list(await lister(session_id=session_id, limit=limit))

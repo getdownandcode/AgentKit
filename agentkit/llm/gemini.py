@@ -152,48 +152,65 @@ class GeminiClient(LLMClient):
                 status_code=int(status_code) if isinstance(status_code, int) else None,
             ) from exc
 
-        # Parse candidate parts
-        text_parts: list[str] = []
-        tool_calls: list[ToolCall] = []
+        # Response assembly stays inside the error boundary: reading ``raw_response.text`` raises on
+        # blocked prompts, an empty ``candidates`` list would IndexError, and a mock or future
+        # SDK shape can drop attributes. All of those are provider faults, so they have to
+        # surface as LLMProviderError for callers to map, not as raw SDK exceptions.
+        try:
+            text_parts: list[str] = []
+            tool_calls: list[ToolCall] = []
 
-        if raw_response.candidates:
-            candidate = raw_response.candidates[0]
-            if candidate.content and candidate.content.parts:
-                for part in candidate.content.parts:
-                    if getattr(part, "text", None):
-                        text_parts.append(part.text)
-                    if getattr(part, "function_call", None):
-                        fc = part.function_call
-                        raw_sig = getattr(part, "thought_signature", None)
-                        sig = raw_sig if isinstance(raw_sig, bytes) else None
-                        tool_calls.append(
-                            ToolCall(
-                                id=str(uuid.uuid4())[:8],
-                                name=fc.name,
-                                arguments=dict(fc.args or {}),
-                                thought_signature=sig,
+            candidates = getattr(raw_response, "candidates", None)
+            if candidates:
+                candidate = candidates[0]
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if getattr(part, "text", None):
+                            text_parts.append(part.text)
+                        if getattr(part, "function_call", None):
+                            fc = part.function_call
+                            raw_sig = getattr(part, "thought_signature", None)
+                            sig = raw_sig if isinstance(raw_sig, bytes) else None
+                            tool_calls.append(
+                                ToolCall(
+                                    # Full UUID: tool_call_id is the join key between an
+                                    # assistant tool call and its tool result, so a truncated
+                                    # 32-bit id risks collisions within a long session.
+                                    id=str(uuid.uuid4()),
+                                    name=fc.name,
+                                    arguments=dict(fc.args or {}),
+                                    thought_signature=sig,
+                                )
                             )
-                        )
 
-        # Extract usage metrics
-        input_tokens = 0
-        output_tokens = 0
-        if getattr(raw_response, "usage_metadata", None):
-            input_tokens = getattr(raw_response.usage_metadata, "prompt_token_count", 0) or 0
-            output_tokens = getattr(raw_response.usage_metadata, "candidates_token_count", 0) or 0
+            # Extract usage metrics
+            input_tokens = 0
+            output_tokens = 0
+            if getattr(raw_response, "usage_metadata", None):
+                input_tokens = getattr(raw_response.usage_metadata, "prompt_token_count", 0) or 0
+                output_tokens = (
+                    getattr(raw_response.usage_metadata, "candidates_token_count", 0) or 0
+                )
 
-        text = "".join(text_parts).strip()
-        if not text and getattr(raw_response, "text", None):
-            text = raw_response.text
+            text = "".join(text_parts).strip()
+            if not text and getattr(raw_response, "text", None):
+                text = raw_response.text
 
-        metadata: dict[str, Any] = {}
-        if hasattr(raw_response, "model_dump"):
-            try:
-                dumped = raw_response.model_dump()
-                if isinstance(dumped, dict):
-                    metadata = dumped
-            except Exception:
-                metadata = {}
+            metadata: dict[str, Any] = {}
+            if hasattr(raw_response, "model_dump"):
+                try:
+                    dumped = raw_response.model_dump()
+                    if isinstance(dumped, dict):
+                        metadata = dumped
+                except Exception:
+                    metadata = {}
+        except (LLMProviderError, AuthenticationError):
+            raise
+        except Exception as exc:
+            raise LLMProviderError(
+                provider="gemini",
+                message=f"Malformed Gemini response: {exc}",
+            ) from exc
 
         return LLMResponse(
             text=text,

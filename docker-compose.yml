@@ -49,6 +49,10 @@ services:
         condition: service_healthy
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
+      # Settings validation requires API_KEYS, and both alembic and the seed script
+      # construct Settings. Passed through so the compose stack fails closed here,
+      # with the same validation error, rather than in the api service.
+      - API_KEYS=${API_KEYS:-}
     networks:
       - agentkit-net
 

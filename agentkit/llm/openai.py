@@ -128,44 +128,80 @@ class OpenAIClient(LLMClient):
         except Exception as exc:
             raise LLMProviderError(provider="openai", message=str(exc)) from exc
 
-        choice = raw_response.choices[0]
-        choice_message = choice.message
-        text = choice_message.content or ""
-        tool_calls: list[ToolCall] = []
-
-        if getattr(choice_message, "tool_calls", None):
-            for tc in choice_message.tool_calls:
-                call_id = tc.id or str(uuid.uuid4())[:8]
-                func_name = tc.function.name
-                raw_args = tc.function.arguments or "{}"
-                if isinstance(raw_args, str):
-                    try:
-                        parsed_args = json.loads(raw_args)
-                    except Exception:
-                        parsed_args = {"raw": raw_args}
-                else:
-                    parsed_args = dict(raw_args)
-
-                tool_calls.append(
-                    ToolCall(
-                        id=call_id,
-                        name=func_name,
-                        arguments=parsed_args,
-                    )
+        # Response assembly stays inside the error boundary: an empty ``choices`` list would
+        # IndexError and unexpected SDK shapes would raise attribute errors. Those are
+        # provider faults and must surface as LLMProviderError so callers can map them.
+        try:
+            if not raw_response.choices:
+                raise LLMProviderError(
+                    provider="openai",
+                    message="Response contained no choices.",
                 )
 
-        input_tokens = 0
-        output_tokens = 0
-        if getattr(raw_response, "usage", None):
-            input_tokens = getattr(raw_response.usage, "prompt_tokens", 0) or 0
-            output_tokens = getattr(raw_response.usage, "completion_tokens", 0) or 0
+            choice = raw_response.choices[0]
+            choice_message = choice.message
+            text = choice_message.content or ""
+            tool_calls: list[ToolCall] = []
 
-        metadata: dict[str, Any] = {}
-        if hasattr(raw_response, "model_dump"):
-            try:
-                metadata = raw_response.model_dump()
-            except Exception:
-                metadata = {}
+            if getattr(choice_message, "tool_calls", None):
+                for tc in choice_message.tool_calls:
+                    # Full UUID: tool_call_id is the join key between an assistant tool
+                    # call and its tool result, so a truncated 32-bit id risks collisions.
+                    call_id = tc.id or str(uuid.uuid4())
+                    func_name = tc.function.name
+                    raw_args = tc.function.arguments or "{}"
+                    if isinstance(raw_args, str):
+                        try:
+                            parsed_args = json.loads(raw_args)
+                        except json.JSONDecodeError as exc:
+                            # Substituting {"raw": ...} here would surface downstream as a
+                            # misleading "missing required field" validation error instead of
+                            # naming the real fault: the model emitted malformed JSON.
+                            raise LLMProviderError(
+                                provider="openai",
+                                message=(
+                                    f"Tool call '{func_name}' carried malformed JSON arguments: {exc}"
+                                ),
+                            ) from exc
+                    else:
+                        parsed_args = dict(raw_args)
+
+                    if not isinstance(parsed_args, dict):
+                        raise LLMProviderError(
+                            provider="openai",
+                            message=(
+                                f"Tool call '{func_name}' arguments must decode to an object, "
+                                f"got {type(parsed_args).__name__}."
+                            ),
+                        )
+
+                    tool_calls.append(
+                        ToolCall(
+                            id=call_id,
+                            name=func_name,
+                            arguments=parsed_args,
+                        )
+                    )
+
+            input_tokens = 0
+            output_tokens = 0
+            if getattr(raw_response, "usage", None):
+                input_tokens = getattr(raw_response.usage, "prompt_tokens", 0) or 0
+                output_tokens = getattr(raw_response.usage, "completion_tokens", 0) or 0
+
+            metadata: dict[str, Any] = {}
+            if hasattr(raw_response, "model_dump"):
+                try:
+                    metadata = raw_response.model_dump()
+                except Exception:
+                    metadata = {}
+        except (LLMProviderError, AuthenticationError, RateLimitExceededError):
+            raise
+        except Exception as exc:
+            raise LLMProviderError(
+                provider="openai",
+                message=f"Malformed OpenAI response: {exc}",
+            ) from exc
 
         return LLMResponse(
             text=text,

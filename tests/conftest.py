@@ -34,6 +34,13 @@ from agentkit.config import get_settings
 REAL_INFRA_ENV_FLAG = "AGENTKIT_REAL_INFRA"
 TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
+# Settings now refuses to validate without an explicit API_KEYS, which is the intended
+# fail-closed behaviour for a deployment but would break any test that reaches the module
+# level ``app = create_app()`` in agentkit.api.main. A fixed test key is seeded before that
+# import happens, and an operator-supplied value always wins so the suite stays hermetic
+# regardless of the developer's local .env.
+os.environ.setdefault("API_KEYS", "test_api_key_env_default")
+
 #: Only AgentKit-owned key prefixes are removed between tests so pointing the
 #: suite at a shared development Redis cannot destroy unrelated data.
 MANAGED_REDIS_PATTERNS = ("session:*", "ratelimit:*")

@@ -52,13 +52,17 @@ def test_create_from_settings_gemini() -> None:
         LLM_PROVIDER="gemini",
         LLM_MODEL="gemini-2.0-flash",
         GEMINI_API_KEY="test-gemini-key",
-        MAX_RETRIES=3,
+        LLM_MAX_RETRIES=3,
+        LLM_RETRY_BASE_DELAY_S=0.25,
+        LLM_RETRY_MAX_DELAY_S=2.5,
     )
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, RetryingLLMClient)
     assert isinstance(client._client, GeminiClient)
     assert client.model == "gemini-2.0-flash"
     assert client._max_retries == 3
+    assert client._base_delay == 0.25
+    assert client._max_delay == 2.5
 
 
 def test_create_from_settings_openai() -> None:
@@ -66,7 +70,7 @@ def test_create_from_settings_openai() -> None:
         LLM_PROVIDER="openai",
         LLM_MODEL="gpt-4o",
         OPENAI_API_KEY="test-openai-key",
-        MAX_RETRIES=2,
+        LLM_MAX_RETRIES=2,
     )
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, RetryingLLMClient)
@@ -80,7 +84,7 @@ def test_create_from_settings_zero_retries() -> None:
         LLM_PROVIDER="gemini",
         LLM_MODEL="gemini-2.0-flash",
         GEMINI_API_KEY="test-gemini-key",
-        MAX_RETRIES=0,
+        LLM_MAX_RETRIES=0,
     )
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, GeminiClient)

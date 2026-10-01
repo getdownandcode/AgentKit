@@ -43,8 +43,11 @@ class RedisMemoryStore(SessionStore):
         if messages and messages[0].role == Role.SYSTEM:
             system_msg = messages[0]
             non_system = messages[1:]
-            truncated = non_system[-max_messages:]
-            return [system_msg, *truncated]
+            # The system prompt occupies one of the max_messages slots, so only
+            # max_messages - 1 conversational turns fit. Taking a full tail would silently
+            # return max_messages + 1 entries and grow the history without bound.
+            budget = max_messages - 1
+            return [system_msg, *non_system[-budget:]] if budget > 0 else [system_msg]
 
         return messages[-max_messages:]
 
