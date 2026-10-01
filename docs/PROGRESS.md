@@ -372,6 +372,8 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Commits**: 2
 - **Notes**: Updated `examples/demo.py` so that `build_llm` raises an explicit `ValueError` when running in live mode without the required API keys rather than silently falling back to `FakeLLMClient`. Configured `create_llm_client` invocation in demo with explicit API keys from settings. Removed unused configuration keys (`JWT_SECRET` and `ENVIRONMENT`) from `README.md` sample `.env` snippet. Added test in `tests/integration/test_demo.py`.
 
-
-
-
+### AUD-07: Gemini Multi-Turn Role Specification & Active Model Standard
+- **Status**: Done
+- **PR**: #51
+- **Commits**: 2
+- **Notes**: Resolved upstream Google Gemini API requirement for multi-turn function responses: updated tool execution output message to `role="user"` wrapping `types.Part.from_function_response(...)`. Updated default model to `gemini-3.7-flash` across application settings, factory, adapter, docker-compose, and `.env.example`.
