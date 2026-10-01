@@ -7,7 +7,15 @@ Problem:
     "What was the total revenue from 'Electronics' category in 2024, and what would
     be the total if we applied an 8.5% sales tax?"
 
+By default the demo runs against the infrastructure configured in the environment
+(DATABASE_URL / REDIS_URL), so the run and step records it produces are persisted to
+PostgreSQL and Redis exactly as they would be in production. The seed script creates
+``products`` and ``orders`` tables in the target database.
+
+Pass ``--offline`` for a fully hermetic run that needs no services and no API keys.
+
 Usage:
+    docker compose up -d postgres redis
     python examples/demo.py --offline
     python examples/demo.py --provider gemini
     python examples/demo.py --provider openai
@@ -18,41 +26,101 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
+from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from agentkit.config import get_settings
 from agentkit.core.agent import Agent, AgentConfig
-from agentkit.core.trace import InMemoryTraceSink
+from agentkit.core.pg_trace import PostgresTraceSink
+from agentkit.core.trace import InMemoryTraceSink, TraceSink
 from agentkit.llm.base import LLMClient
 from agentkit.llm.factory import create_llm_client
 from agentkit.llm.fake import FakeLLMClient
+from agentkit.memory.base import InMemoryMemoryStore, MemoryStore, SessionStore
+from agentkit.memory.pg_store import PostgresMemoryStore
+from agentkit.memory.redis_store import RedisMemoryStore
+from agentkit.memory.tiered import TieredMemoryStore
 from agentkit.tools.builtin.calculator import calculator
 from agentkit.tools.builtin.sql_readonly import execute_sql_query
 from agentkit.tools.registry import ToolRegistry
 
 logger = logging.getLogger("agentkit.demo")
 
+IN_MEMORY_DB_URL = "sqlite+aiosqlite:///:memory:"
 
-async def setup_demo_database(db_url: str) -> AsyncEngine:
-    """Initialize and seed demo database from scripts/seed_demo_db.sql."""
-    engine = create_async_engine(db_url)
+
+@dataclass
+class DemoResources:
+    """Stores and connections owned by a demo run, all closable."""
+
+    memory: MemoryStore
+    trace_sink: TraceSink
+    session_id: str | None
+    redis: Redis | None = None
+    engine: AsyncEngine | None = None
+
+
+async def seed_demo_database(engine: AsyncEngine) -> None:
+    """Apply scripts/seed_demo_db.sql, creating products and orders tables."""
     seed_path = Path(__file__).parents[1] / "scripts" / "seed_demo_db.sql"
-
     if not seed_path.exists():
         raise FileNotFoundError(f"Seed script not found at {seed_path}")
 
-    sql_content = seed_path.read_text(encoding="utf-8")
-    statements = [stmt.strip() for stmt in sql_content.split(";") if stmt.strip()]
-
+    statements = [s.strip() for s in seed_path.read_text(encoding="utf-8").split(";") if s.strip()]
     async with engine.begin() as conn:
         for stmt in statements:
             await conn.execute(text(stmt))
 
-    logger.info("Demo database seeded successfully with products and orders.")
-    return engine
+    logger.info("Seeded products and orders into the demo database.")
+
+
+async def build_persistence(db_url: str, offline: bool) -> DemoResources:
+    """Select durable or in-memory stores depending on the requested mode."""
+    if offline or db_url.startswith("sqlite"):
+        logger.info("Using in-memory stores (hermetic mode).")
+        return DemoResources(
+            memory=InMemoryMemoryStore(),
+            trace_sink=InMemoryTraceSink(),
+            session_id=None,
+        )
+
+    settings = get_settings()
+    engine = create_async_engine(db_url, pool_pre_ping=True)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Run records always go to PostgreSQL; the session tier degrades on its own so a
+    # Redis outage costs conversation history rather than the whole demo.
+    run_store = PostgresMemoryStore(factory)
+    session_store: SessionStore
+    redis_client: Redis | None
+    try:
+        redis_client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        await redis_client.ping()
+        session_store = RedisMemoryStore(redis_client, ttl_s=settings.SESSION_TTL_S)
+    except Exception as exc:
+        logger.warning(
+            "Redis unreachable (%s); runs persist to PostgreSQL but sessions stay in memory.",
+            exc,
+        )
+        redis_client = None
+        session_store = InMemoryMemoryStore()
+
+    return DemoResources(
+        memory=TieredMemoryStore(session_store=session_store, run_store=run_store),
+        trace_sink=PostgresTraceSink(factory),
+        session_id="demo-session" if redis_client is not None else None,
+        redis=redis_client,
+        engine=engine,
+    )
 
 
 def build_fake_llm() -> LLMClient:
@@ -84,6 +152,20 @@ def build_fake_llm() -> LLMClient:
     return client
 
 
+def build_llm(offline: bool, provider: str) -> LLMClient:
+    """Resolve the LLM client, degrading to the scripted fake when no key is present."""
+    if offline or provider == "fake":
+        return build_fake_llm()
+
+    settings = get_settings()
+    key_present = settings.GEMINI_API_KEY if provider == "gemini" else settings.OPENAI_API_KEY
+    if not key_present:
+        logger.warning("No API key for provider '%s'; falling back to FakeLLMClient.", provider)
+        return build_fake_llm()
+
+    return create_llm_client(provider)
+
+
 async def run_demo(
     offline: bool = False,
     provider: str = "gemini",
@@ -92,54 +174,41 @@ async def run_demo(
     """Run the multi-tool AgentKit demonstration.
 
     Args:
-        offline: If True, uses FakeLLMClient with scripted ReAct turns.
-        provider: Provider name ('gemini', 'openai', 'fake') if offline=False.
-        db_url: Optional SQLAlchemy database URL override.
+        offline: Use FakeLLMClient and in-memory stores with no external services.
+        provider: LLM provider name ('gemini', 'openai', 'fake') when not offline.
+        db_url: SQLAlchemy URL override. Defaults to the configured DATABASE_URL,
+            falling back to in-memory SQLite when offline.
 
     Returns:
         The agent's final answer string.
     """
     settings = get_settings()
-    target_db_url = db_url or "sqlite+aiosqlite:///:memory:"
+    target_db_url = IN_MEMORY_DB_URL if offline else (db_url or settings.DATABASE_URL)
 
-    # 1. Initialize and seed database
-    engine = await setup_demo_database(target_db_url)
+    query_engine = create_async_engine(target_db_url, pool_pre_ping=True)
+    await seed_demo_database(query_engine)
 
-    # 2. Register tools in an isolated registry
+    resources = await build_persistence(target_db_url, offline)
+
     registry = ToolRegistry()
     registry.register(calculator)
 
     async def execute_demo_sql(query: str) -> str:
-        """Execute a read-only SQL query against the database and return results as markdown table."""
-        return await execute_sql_query(query, engine=engine)
+        """Execute a read-only SQL query against the demo database."""
+        return await execute_sql_query(query, engine=query_engine)
 
     registry.register(
         execute_demo_sql,
         name="sql_readonly",
-        description="Execute a read-only SQL query against the database and return results as markdown table.",
+        description="Execute a read-only SQL query and return the results as a markdown table.",
     )
 
-    # 3. Choose LLM Client
-    llm: LLMClient
-    if offline or provider == "fake":
-        llm = build_fake_llm()
-    else:
-        # Check for provider API key
-        if provider == "gemini" and not settings.GEMINI_API_KEY:
-            logger.warning("No GEMINI_API_KEY detected. Falling back to offline FakeLLMClient.")
-            llm = build_fake_llm()
-        elif provider == "openai" and not settings.OPENAI_API_KEY:
-            logger.warning("No OPENAI_API_KEY detected. Falling back to offline FakeLLMClient.")
-            llm = build_fake_llm()
-        else:
-            llm = create_llm_client(provider)
-
-    # 4. Create Agent with trace sink
-    trace_sink = InMemoryTraceSink()
+    llm = build_llm(offline, provider)
     agent = Agent(
         llm=llm,
         registry=registry,
-        trace=trace_sink,
+        memory=resources.memory,
+        trace=resources.trace_sink,
         config=AgentConfig(
             max_steps=6,
             run_timeout_s=30.0,
@@ -150,23 +219,32 @@ async def run_demo(
         ),
     )
 
-    query = (
+    question = (
         "What was the total revenue from 'Electronics' category in 2024, "
         "and what would be the total if we applied an 8.5% sales tax?"
     )
+    logger.info("Executing AgentKit with prompt: %s", question)
 
-    logger.info("Executing AgentKit with prompt: %s", query)
-    result = await agent.run(query)
-
-    logger.info(
-        "Agent run finished. Status: %s, Steps: %d",
-        result.status.value,
-        result.steps_count,
-    )
-    logger.info("Final Answer:\n%s", result.final_answer)
-
-    await engine.dispose()
-    return result.final_answer or ""
+    try:
+        result = await agent.run(question, session_id=resources.session_id)
+        logger.info(
+            "Agent run finished. Status: %s, Steps: %d",
+            result.status.value,
+            result.steps_count,
+        )
+        logger.info("Run ID: %s", result.run_id)
+        logger.info("Final Answer:\n%s", result.final_answer)
+        return result.final_answer or ""
+    finally:
+        await query_engine.dispose()
+        if resources.engine is not None:
+            await resources.engine.dispose()
+        if resources.redis is not None:
+            aclose = getattr(resources.redis, "aclose", None)
+            if callable(aclose):
+                await aclose()
+            else:
+                await resources.redis.close()
 
 
 def main() -> None:
@@ -178,7 +256,7 @@ def main() -> None:
     parser.add_argument(
         "--offline",
         action="store_true",
-        help="Run completely offline using FakeLLMClient without API keys",
+        help="Run hermetically with FakeLLMClient, in-memory SQLite and no services",
     )
     parser.add_argument(
         "--provider",
@@ -191,7 +269,7 @@ def main() -> None:
         "--db-url",
         type=str,
         default=None,
-        help="Custom SQLAlchemy database URL (defaults to in-memory SQLite)",
+        help="SQLAlchemy database URL (defaults to DATABASE_URL, or in-memory SQLite when offline)",
     )
     args = parser.parse_args()
 
