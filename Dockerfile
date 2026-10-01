@@ -47,6 +47,7 @@ WORKDIR /app
 # Copy application files and migrations
 COPY --chown=agentkit:agentkit alembic.ini ./
 COPY --chown=agentkit:agentkit migrations ./migrations
+COPY --chown=agentkit:agentkit scripts ./scripts
 COPY --chown=agentkit:agentkit agentkit ./agentkit
 
 # Switch to non-root user
