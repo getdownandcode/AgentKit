@@ -45,12 +45,12 @@ def test_create_unknown_provider_raises() -> None:
 def test_create_from_settings_gemini() -> None:
     settings = Settings(
         LLM_PROVIDER="gemini",
-        LLM_MODEL="gemini-2.5-flash",
+        LLM_MODEL="gemini-2.0-flash",
         GEMINI_API_KEY="test-gemini-key",
     )
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, GeminiClient)
-    assert client.model == "gemini-2.5-flash"
+    assert client.model == "gemini-2.0-flash"
 
 
 def test_create_from_settings_openai() -> None:

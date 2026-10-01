@@ -72,7 +72,7 @@ class RedisMemoryStore(SessionStore):
             messages = self.truncate_messages(messages, self.max_messages)
 
         key = self._key(session_id)
-        serialized = json.dumps([m.model_dump() for m in messages])
+        serialized = json.dumps([m.model_dump(mode="json") for m in messages])
         await self._client.set(key, serialized, ex=self.ttl_s)
         logger.debug(
             "Saved %d messages to Redis for session %s (TTL: %ds)",

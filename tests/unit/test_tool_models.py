@@ -37,7 +37,17 @@ def test_tool_call_model() -> None:
         "id": "call_123",
         "name": "calculator",
         "arguments": {"expression": "2 + 2"},
+        "thought_signature": None,
     }
+
+    call_with_sig = ToolCall(
+        id="call_456",
+        name="search",
+        arguments={"query": "test"},
+        thought_signature=b"test_signature",
+    )
+    assert call_with_sig.thought_signature == b"test_signature"
+    assert call_with_sig.model_dump(mode="json")["thought_signature"] == "test_signature"
 
 
 def test_tool_schema_model() -> None:
