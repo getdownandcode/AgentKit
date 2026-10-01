@@ -36,6 +36,9 @@ dev = [
     "types-redis>=4.6.0",
     "fakeredis>=2.26.0",
     "aiosqlite>=0.20.0",
+    # fakeredis only implements EVAL when a Lua runtime is present. The rate limiter
+    # relies on server-side scripting, so the hermetic tests need lupa to match.
+    "lupa>=2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
