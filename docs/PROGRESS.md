@@ -55,6 +55,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M13-T05 | M13       | Idempotent Demo Seeding & Compose Auto-Seed | `feat/docker-compose-seed` | #46 | 2 | Done | ON CONFLICT DO NOTHING, scripts/seed.py, compose boot auto-seed |
 | AUD-01  | AUD       | Strict Infrastructure Resolution in API Dependencies | `fix/api-deps-strict-infrastructure` | #48 | 2 | Done | Eliminate silent in-memory and fake LLM fallbacks from deps.py |
 | AUD-04  | AUD       | Wire RetryingLLMClient into LLM Factory | `fix/wire-llm-retry-wrapper` | #49 | 2 | Done | Added MAX_RETRIES setting and wrapped live LLM providers with retry |
+| AUD-05  | AUD       | Strict Demo Mode & README Configuration Cleanup | `fix/demo-strict-mode-and-docs` | #50 | 2 | Done | Explicit credential validation in demo and remove unused env keys |
 
 ---
 
@@ -364,6 +365,13 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #49
 - **Commits**: 2
 - **Notes**: Added `MAX_RETRIES: int = Field(default=3, ge=0)` to application `Settings`. Updated `create_llm_client_from_settings` in `agentkit/llm/factory.py` to wrap live providers (`gemini`, `openai`) with `RetryingLLMClient` when `MAX_RETRIES > 0`, applying exponential backoff and jitter to transient 429/5xx errors. Unit tests in `tests/unit/test_llm_factory.py`.
+
+### AUD-05 / AUD-06: Strict Demo Mode & README Configuration Cleanup
+- **Status**: Done
+- **PR**: #50
+- **Commits**: 2
+- **Notes**: Updated `examples/demo.py` so that `build_llm` raises an explicit `ValueError` when running in live mode without the required API keys rather than silently falling back to `FakeLLMClient`. Configured `create_llm_client` invocation in demo with explicit API keys from settings. Removed unused configuration keys (`JWT_SECRET` and `ENVIRONMENT`) from `README.md` sample `.env` snippet. Added test in `tests/integration/test_demo.py`.
+
 
 
 
