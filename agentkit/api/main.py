@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agentkit.api.routes import discovery_router
 from agentkit.api.routes import router as runs_router
@@ -22,8 +21,10 @@ from agentkit.core.errors import (
     RateLimitExceededError,
     RunNotFoundError,
     RunTimeoutError,
+    ServiceUnavailableError,
     ToolNotFoundError,
 )
+from agentkit.db.session import create_engine, create_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ def map_agentkit_error_status(exc: AgentKitError) -> int:
         return 429
     if isinstance(exc, LLMProviderError):
         return 502
+    if isinstance(exc, ServiceUnavailableError):
+        return 503
     return 400
 
 
@@ -48,8 +51,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage lifecycle of database engine, session factory, and Redis connection pool."""
     settings: Settings = getattr(app.state, "settings", None) or get_settings()
 
-    engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    session_factory = create_session_factory(engine)
     redis_client: Redis[Any] = Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
     app.state.db_engine = engine
