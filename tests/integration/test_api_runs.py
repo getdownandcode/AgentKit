@@ -5,11 +5,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentkit.api.deps import get_agent, get_memory_store
+from agentkit.api.deps import get_agent, get_llm_client, get_memory_store, get_trace_sink
 from agentkit.api.main import create_app
 from agentkit.config import Settings
 from agentkit.core.agent import Agent, AgentConfig
 from agentkit.core.pg_trace import PostgresTraceSink
+from agentkit.core.trace import InMemoryTraceSink
 from agentkit.db.models import Base
 from agentkit.llm.base import LLMResponse
 from agentkit.llm.fake import FakeLLMClient
@@ -48,6 +49,9 @@ def test_runs_auth_required() -> None:
 def test_runs_validation_error() -> None:
     settings = Settings(API_KEYS="secret_token")
     app = create_app(settings=settings)
+    app.dependency_overrides[get_memory_store] = lambda: InMemoryMemoryStore()
+    app.dependency_overrides[get_trace_sink] = lambda: InMemoryTraceSink()
+    app.dependency_overrides[get_llm_client] = lambda: FakeLLMClient()
     client = TestClient(app, raise_server_exceptions=False)
     headers = {"X-API-Key": "secret_token"}
 
@@ -144,6 +148,7 @@ def test_get_nonexistent_run() -> None:
     app = create_app(settings=settings)
     memory_store = InMemoryMemoryStore()
     app.dependency_overrides[get_memory_store] = lambda: memory_store
+    app.dependency_overrides[get_trace_sink] = lambda: InMemoryTraceSink()
 
     client = TestClient(app, raise_server_exceptions=False)
     headers = {"X-API-Key": "secret_token"}
