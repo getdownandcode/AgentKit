@@ -38,7 +38,7 @@ def create_llm_client(
     normalized_provider = provider.strip().lower()
 
     if normalized_provider == "gemini":
-        default_model = model or "gemini-2.0-flash"
+        default_model = model or "gemini-3.7-flash"
         return GeminiClient(api_key=api_key, model=default_model, **kwargs)
 
     if normalized_provider == "openai":

@@ -195,15 +195,15 @@ async def test_gemini_thought_signature_capture_and_forward(mock_genai_client: M
     assert model_part.function_call.name == "calculator"
     assert model_part.thought_signature == b"opaque_thought_sig_xyz"
 
-    # Tool message must have role="tool" and function_response name resolved to "calculator"
+    # Tool message must have role="user" and function_response name resolved to "calculator"
     tool_content = contents[2]
-    assert tool_content.role == "tool"
+    assert tool_content.role == "user"
     tool_part = tool_content.parts[0]
     assert tool_part.function_response.name == "calculator"
     assert tool_part.function_response.response == {"result": "4"}
 
 
 def test_gemini_default_model(mock_genai_client: MagicMock) -> None:
-    """Verify GeminiClient defaults to gemini-2.0-flash."""
+    """Verify GeminiClient defaults to gemini-3.7-flash."""
     adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
-    assert adapter.model == "gemini-2.0-flash"
+    assert adapter.model == "gemini-3.7-flash"
