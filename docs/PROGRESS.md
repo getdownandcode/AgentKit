@@ -53,6 +53,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M13-T03 | M13       | CI Split, Compose Hardening | `fix/real-infrastructure-verification` | #44 | 1 | Done | CI live service job, strict compose API_KEYS, demo persistence |
 | M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, tool role, gemini-2.0-flash default |
 | M13-T05 | M13       | Idempotent Demo Seeding & Compose Auto-Seed | `feat/docker-compose-seed` | #46 | 2 | Done | ON CONFLICT DO NOTHING, scripts/seed.py, compose boot auto-seed |
+| AUD-01  | AUD       | Strict Infrastructure Resolution in API Dependencies | `fix/api-deps-strict-infrastructure` | #48 | 2 | Done | Eliminate silent in-memory and fake LLM fallbacks from deps.py |
 
 ---
 
@@ -350,4 +351,11 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #46
 - **Commits**: 2
 - **Notes**: Completed SPEC Section 13 requirement for automated demo database seeding on `docker compose up`. Updated `scripts/seed_demo_db.sql` with `ON CONFLICT (id) DO NOTHING;` to guarantee idempotency across multiple runs; created standalone CLI and programmatic async seeding script `scripts/seed.py`; updated `Dockerfile` to copy `scripts/` to runtime container; updated `docker-compose.yml` migrations service to execute `alembic upgrade head && python scripts/seed.py`; delegated `examples/demo.py` seeding to `scripts.seed.seed_database`; added integration test in `tests/integration/test_seed.py`.
+
+### AUD-01 / AUD-02 / AUD-03: Strict Infrastructure Resolution in API Dependencies
+- **Status**: Done
+- **PR**: #48
+- **Commits**: 2
+- **Notes**: Removed silent fallbacks to `InMemoryMemoryStore`, `InMemoryTraceSink`, and `FakeLLMClient` in `agentkit/api/deps.py`. API dependencies now strictly require live PostgreSQL and Redis services, raising `ServiceUnavailableError` (HTTP 503) if absent. `get_llm_client` now instantiates the configured provider directly and allows authentication or configuration errors to surface rather than silently masking them with a mock client. Added integration tests in `tests/integration/test_api_deps_strict.py`.
+
 
