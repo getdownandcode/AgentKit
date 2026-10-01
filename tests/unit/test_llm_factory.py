@@ -5,6 +5,7 @@ from agentkit.llm.factory import create_llm_client, create_llm_client_from_setti
 from agentkit.llm.fake import FakeLLMClient
 from agentkit.llm.gemini import GeminiClient
 from agentkit.llm.openai import OpenAIClient
+from agentkit.llm.retry import RetryingLLMClient
 
 
 def test_create_fake_client() -> None:
@@ -40,9 +41,6 @@ def test_create_openai_client() -> None:
 def test_create_unknown_provider_raises() -> None:
     with pytest.raises(ValueError, match="Unsupported LLM provider"):
         create_llm_client(provider="claude")
-
-
-from agentkit.llm.retry import RetryingLLMClient
 
 
 def test_create_from_settings_gemini() -> None:
@@ -90,4 +88,3 @@ def test_create_from_settings_fake() -> None:
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, FakeLLMClient)
     assert not isinstance(client, RetryingLLMClient)
-

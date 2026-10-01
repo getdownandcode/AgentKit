@@ -8,6 +8,7 @@ from agentkit.llm.base import LLMClient
 from agentkit.llm.fake import FakeLLMClient
 from agentkit.llm.gemini import GeminiClient
 from agentkit.llm.openai import OpenAIClient
+from agentkit.llm.retry import RetryingLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def create_llm_client_from_settings(settings: Settings) -> LLMClient:
         settings: Application Settings instance.
 
     Returns:
-        Configured LLMClient instance.
+        Configured LLMClient instance (wrapped with RetryingLLMClient for live providers).
     """
     provider = settings.LLM_PROVIDER.strip().lower()
     api_key: str | None = None
@@ -69,8 +70,16 @@ def create_llm_client_from_settings(settings: Settings) -> LLMClient:
     elif provider == "openai":
         api_key = settings.OPENAI_API_KEY
 
-    return create_llm_client(
+    client = create_llm_client(
         provider=provider,
         api_key=api_key,
         model=settings.LLM_MODEL,
     )
+
+    if provider in ("gemini", "openai") and settings.MAX_RETRIES > 0:
+        return RetryingLLMClient(
+            client=client,
+            max_retries=settings.MAX_RETRIES,
+        )
+
+    return client
