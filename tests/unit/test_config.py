@@ -14,7 +14,7 @@ def test_default_settings() -> None:
         API_KEYS="key1,key2",
     )
     assert settings.LLM_PROVIDER == "gemini"
-    assert settings.LLM_MODEL == "gemini-2.0-flash"
+    assert settings.LLM_MODEL == "gemini-3.7-flash"
     assert settings.MAX_STEPS == 10
     assert settings.RUN_TIMEOUT_S == 60
     assert settings.TOOL_TIMEOUT_S == 15
