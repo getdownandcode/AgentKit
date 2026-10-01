@@ -120,8 +120,9 @@ JWT_SECRET=super_secret_jwt_key_at_least_32_bytes_long
 ### 4. Running with Docker Compose (Recommended)
 Launch the API, PostgreSQL, and Redis together with automatic migrations.
 
-`API_KEYS` has no default in `docker-compose.yml`: the stack refuses to start until you
-supply one, so a known test key can never reach a reachable instance.
+`docker-compose.yml` ships no default `API_KEYS`. Leave it unset and the api service
+fails immediately on settings validation rather than starting with a published key;
+`down`, `ps` and `logs` still work either way.
 
 ```bash
 export API_KEYS=ak_local_dev_key   # or place API_KEYS in your .env
