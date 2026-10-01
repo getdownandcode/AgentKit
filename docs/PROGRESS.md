@@ -377,3 +377,16 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #51
 - **Commits**: 2
 - **Notes**: Resolved upstream Google Gemini API requirement for multi-turn function responses: updated tool execution output message to `role="user"` wrapping `types.Part.from_function_response(...)`. Updated default model to `gemini-3.7-flash` across application settings, factory, adapter, docker-compose, and `.env.example`.
+
+### AUD-08: Expose Configurable Timeout and Model Upgrades
+- **Status**: Done
+- **PR**: #52
+- **Commits**: 2
+- **Notes**: Exposed `RUN_TIMEOUT_S` in `docker-compose.yml` to support multi-step agent runs across network latency. Updated candidate model probe and unit tests.
+
+### AUD-09: Live End-to-End Verification & Documentation Proof
+- **Status**: Done
+- **PR**: #53
+- **Commits**: 3
+- **Notes**: Standardized on `gemini-3.1-flash-lite` across application settings, adapter, factory, compose, and documentation. Authored `docs/E2E_REPORT.md` capturing verbatim live outputs for healthcheck, tool discovery, multi-step analytical SQL join + calculator tax calculation ($3,200 / $3,472), Postgres durable row persistence in `runs` and `steps`, and 7 edge cases (unknown tool, bad arguments, division by zero, max steps exceeded, 429 rate limit with Retry-After, SQL injection blocking, and path traversal blocking). Updated `README.md`.
+
