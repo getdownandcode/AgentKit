@@ -28,7 +28,7 @@ def test_create_gemini_client() -> None:
 
     client_default = create_llm_client(provider="gemini", api_key="test-key-gemini")
     assert isinstance(client_default, GeminiClient)
-    assert client_default.model == "gemini-3.8-flash"
+    assert client_default.model == "gemini-3.1-flash-lite"
 
 
 def test_create_openai_client() -> None:
