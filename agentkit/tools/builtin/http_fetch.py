@@ -132,8 +132,10 @@ def verify_peer_address(response: httpx.Response, allowed_ips: list[str]) -> Non
 
     Validating a hostname and then letting the HTTP client resolve it again leaves a
     time-of-check/time-of-use gap: a short-TTL DNS answer can hand back a public address
-    during validation and a loopback or metadata address during connection. Checking the real
-    peer address of the established socket closes that gap.
+    during validation and a loopback or metadata address during connection. Checking the
+    real peer address of the established socket narrows that gap: a rebound connection is
+    refused before any response byte is read, followed, or returned. It cannot unsend the
+    outbound request itself, so this complements rather than replaces pre-flight validation.
 
     Raises:
         ValueError: If the connection landed on an address outside ``allowed_ips``.
@@ -146,10 +148,17 @@ def verify_peer_address(response: httpx.Response, allowed_ips: list[str]) -> Non
         return
 
     server_addr = stream.get_extra_info("server_addr")
-    if not server_addr:
+    if not isinstance(server_addr, (tuple, list)) or not server_addr:
+        # No usable peer address from this transport; the pre-flight validation above
+        # remains the only guard, same as when no network stream is exposed at all.
+        logger.debug("No verifiable peer address; skipping peer check.")
         return
 
     peer_ip = server_addr[0]
+    if not isinstance(peer_ip, str) or is_blocked_ip(peer_ip):
+        raise ValueError(
+            f"SSRF protection blocked connection to '{peer_ip}': the peer address is restricted."
+        )
     normalized_allowed = {str(ipaddress.ip_address(ip)) for ip in allowed_ips}
     normalized_peer = str(ipaddress.ip_address(peer_ip))
     if normalized_peer not in normalized_allowed:

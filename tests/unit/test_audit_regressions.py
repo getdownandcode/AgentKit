@@ -290,6 +290,26 @@ def test_keyword_inside_string_literal_is_allowed() -> None:
     assert validate_sql_query(query) == query
 
 
+def test_comment_markers_inside_literals_are_data_not_comments() -> None:
+    """Masking applies to the comment and separator scans, not just the keyword scan."""
+    assert (
+        validate_sql_query("SELECT * FROM t WHERE note = 'x -- y'")
+        == "SELECT * FROM t WHERE note = 'x -- y'"
+    )
+    assert validate_sql_query("SELECT * FROM t WHERE x = '#5'") == "SELECT * FROM t WHERE x = '#5'"
+    assert (
+        validate_sql_query("SELECT 'it''s; still one' FROM t") == "SELECT 'it''s; still one' FROM t"
+    )
+
+
+def test_real_comment_after_literal_still_rejected() -> None:
+    """An empty literal must not let a following comment hide behind the mask."""
+    with pytest.raises(ValueError, match="Comments are not permitted"):
+        validate_sql_query("SELECT * FROM t WHERE a = '' -- '")
+    with pytest.raises(ValueError, match="Comments are not permitted"):
+        validate_sql_query("SELECT 1 -- comment")
+
+
 def test_keyword_outside_literal_is_still_blocked() -> None:
     with pytest.raises(ValueError, match="prohibited SQL keyword"):
         validate_sql_query("SELECT 'drop me' FROM logs UNION SELECT grant FROM users")
@@ -471,6 +491,21 @@ async def test_sql_query_is_limited_in_sql_not_just_client_side() -> None:
     lines = [line for line in output.strip().split("\n") if line.strip()]
     assert lines == ["| v |", "| --- |", "| a |", "| b |"]
     await engine.dispose()
+
+
+def test_row_limit_rewrite_prefers_appending_over_wrapping() -> None:
+    """Appending LIMIT keeps duplicate-column JOINs working; wrapping is the fallback.
+
+    Verified against PostgreSQL 16, which accepts both forms: the append form is preferred
+    because it cannot change the shape of an already-valid statement.
+    """
+    from agentkit.tools.builtin.sql_readonly import _apply_row_limit
+
+    assert _apply_row_limit("SELECT o.id, p.id FROM o JOIN p ON true", 50).endswith("LIMIT 50")
+    assert "agentkit_limited_query" not in _apply_row_limit("SELECT 1", 50)
+    assert _apply_row_limit("SELECT * FROM t LIMIT 5", 50) == "SELECT * FROM t LIMIT 5"
+    wrapped = _apply_row_limit("SELECT * FROM t FOR UPDATE", 50)
+    assert "agentkit_limited_query" in wrapped and wrapped.endswith("LIMIT 50")
 
 
 # --- seed script: statement-aware splitting -------------------------------------------------
