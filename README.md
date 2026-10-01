@@ -100,11 +100,9 @@ cp .env.example .env
 
 Edit `.env`:
 ```ini
-ENVIRONMENT=development
-LOG_LEVEL=INFO
-
 # LLM Providers (at least one key or use offline mode)
 LLM_PROVIDER=gemini
+LLM_MODEL=gemini-2.0-flash
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENAI_API_KEY=your_openai_api_key_here
 
@@ -112,9 +110,8 @@ OPENAI_API_KEY=your_openai_api_key_here
 DATABASE_URL=postgresql+asyncpg://agentkit:agentkit_password@localhost:5432/agentkit
 REDIS_URL=redis://localhost:6379/0
 
-# Security
-API_KEYS=dev_key_1,dev_key_2
-JWT_SECRET=super_secret_jwt_key_at_least_32_bytes_long
+# Security (comma-separated authorized keys)
+API_KEYS=ak_test_key_12345,ak_admin_key_67890
 ```
 
 ### 4. Running with Docker Compose (Recommended)

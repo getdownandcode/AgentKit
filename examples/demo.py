@@ -144,17 +144,24 @@ def build_fake_llm() -> LLMClient:
 
 
 def build_llm(offline: bool, provider: str) -> LLMClient:
-    """Resolve the LLM client, degrading to the scripted fake when no key is present."""
+    """Resolve the LLM client, requiring valid API keys unless running in offline/fake mode."""
     if offline or provider == "fake":
         return build_fake_llm()
 
     settings = get_settings()
     key_present = settings.GEMINI_API_KEY if provider == "gemini" else settings.OPENAI_API_KEY
     if not key_present:
-        logger.warning("No API key for provider '%s'; falling back to FakeLLMClient.", provider)
-        return build_fake_llm()
+        key_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+        raise ValueError(
+            f"API key for provider '{provider}' is missing ({key_name} is not set). "
+            f"To run offline without real API credentials, pass --offline or --provider fake."
+        )
 
-    return create_llm_client(provider)
+    return create_llm_client(
+        provider=provider,
+        api_key=key_present,
+        model=settings.LLM_MODEL,
+    )
 
 
 async def run_demo(

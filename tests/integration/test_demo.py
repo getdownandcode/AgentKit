@@ -143,8 +143,8 @@ async def test_demo_script_runner() -> None:
 
 def test_build_llm_strict_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify build_llm requires API keys when live provider is requested without --offline."""
-    from examples.demo import build_llm
     from agentkit.config import get_settings
+    from examples.demo import build_llm
 
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "")
@@ -163,4 +163,3 @@ def test_build_llm_strict_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake_client_fake_prov = build_llm(offline=False, provider="fake")
     assert isinstance(fake_client_fake_prov, FakeLLMClient)
-
