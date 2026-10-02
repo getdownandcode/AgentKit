@@ -52,9 +52,8 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       GEMINI_API_KEY: fake_gemini_key_for_testing
       OPENAI_API_KEY: fake_openai_key_for_testing
-      TAVILY_API_KEY: fake_tavily_key_for_testing
+      SEARCH_API_KEY: fake_search_key_for_testing
       API_KEYS: test_api_key_1,test_api_key_2
-      JWT_SECRET: test_secret_key_at_least_32_bytes_long
       PYTHONPATH: .
     steps:
       - name: Check out repository

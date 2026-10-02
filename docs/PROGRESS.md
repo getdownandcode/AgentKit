@@ -56,6 +56,10 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUD-01  | AUD       | Strict Infrastructure Resolution in API Dependencies | `fix/api-deps-strict-infrastructure` | #48 | 2 | Done | Eliminate silent in-memory and fake LLM fallbacks from deps.py |
 | AUD-04  | AUD       | Wire RetryingLLMClient into LLM Factory | `fix/wire-llm-retry-wrapper` | #49 | 2 | Done | Added MAX_RETRIES setting and wrapped live LLM providers with retry |
 | AUD-05  | AUD       | Strict Demo Mode & README Configuration Cleanup | `fix/demo-strict-mode-and-docs` | #50 | 2 | Done | Explicit credential validation in demo and remove unused env keys |
+| AUD-07  | AUD       | Gemini Multi-Turn Role Specification & Active Model Standard | `feat/gemini-tool-calling-fix` | #51 | 2 | Done | Updated function response to role user and default model to gemini-3.1-flash-lite |
+| AUD-08  | AUD       | Expose Configurable Timeout in Docker Compose | `fix/docker-compose-timeout` | #52 | 2 | Done | Exposed RUN_TIMEOUT_S in docker-compose.yml |
+| AUD-09  | AUD       | Live End-to-End Infrastructure Verification & Documentation Proof | `docs/e2e-verification-report` | #53 | 3 | Done | Standardized model, verified live stack, and documented in E2E_REPORT.md |
+
 
 ---
 
