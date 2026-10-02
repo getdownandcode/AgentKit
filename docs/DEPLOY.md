@@ -178,8 +178,6 @@ Fetch production secrets dynamically using the AWS CLI:
 # Create parameters in AWS SSM
 aws ssm put-parameter --name "/agentkit/production/DATABASE_PASSWORD" \
     --value "$(openssl rand -hex 24)" --type "SecureString"
-aws ssm put-parameter --name "/agentkit/production/JWT_SECRET" \
-    --value "$(openssl rand -hex 32)" --type "SecureString"
 aws ssm put-parameter --name "/agentkit/production/API_KEYS" \
     --value "prod_key_$(openssl rand -hex 16)" --type "SecureString"
 aws ssm put-parameter --name "/agentkit/production/GEMINI_API_KEY" \
@@ -191,23 +189,22 @@ cat << 'EOF' > /opt/agentkit/fetch_secrets.sh
 set -euo pipefail
 
 DB_PASS=$(aws ssm get-parameter --name "/agentkit/production/DATABASE_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
-JWT_SEC=$(aws ssm get-parameter --name "/agentkit/production/JWT_SECRET" --with-decryption --query "Parameter.Value" --output text)
 API_KEYS=$(aws ssm get-parameter --name "/agentkit/production/API_KEYS" --with-decryption --query "Parameter.Value" --output text)
 GEMINI_KEY=$(aws ssm get-parameter --name "/agentkit/production/GEMINI_API_KEY" --with-decryption --query "Parameter.Value" --output text)
 
 cat << ENVFILE > /opt/agentkit/.env
-ENVIRONMENT=production
-LOG_LEVEL=INFO
 DATABASE_URL=postgresql+asyncpg://agentkit:${DB_PASS}@postgres:5432/agentkit
 POSTGRES_USER=agentkit
 POSTGRES_PASSWORD=${DB_PASS}
 POSTGRES_DB=agentkit
 REDIS_URL=redis://redis:6379/0
 LLM_PROVIDER=gemini
+LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=${GEMINI_KEY}
-JWT_SECRET=${JWT_SEC}
 API_KEYS=${API_KEYS}
 FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
+RUN_TIMEOUT_S=60
+MAX_RETRIES=3
 ENVFILE
 
 chmod 600 /opt/agentkit/.env

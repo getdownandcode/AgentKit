@@ -108,3 +108,20 @@ This log records significant architectural, technical, and design decisions made
   - `docker compose up` boots directly into a fully seeded, turnkey environment ready for analytical queries via `sql_readonly`.
   - Database seeding is safely re-entrant across container restarts without data duplication or integrity errors.
 
+---
+
+## ADR-008: Gemini Multi-Turn Function Response Role Specification and Model Standardization
+
+- **Date**: 2026-10-01
+- **Status**: Accepted
+- **Context**: The official Google Gemini GenAI SDK requires function execution responses in multi-turn chat history to be represented with `role="user"` wrapping `types.Part.from_function_response(...)`. Setting `role="tool"` triggers an upstream `400 INVALID_ARGUMENT` error because the Gemini API expects function outputs to be submitted as user turns containing function responses. Furthermore, Gemini API access tiers and quotas vary across model tiers; `gemini-3.1-flash-lite` provides ultra-low latency, robust tool calling, and high throughput without encountering regional or tier rate limitations.
+- **Decision**:
+  - Update `GeminiClient.chat()` to wrap function responses with `role="user"` using `types.Part.from_function_response(name=tool_name, response={"result": msg.content})`.
+  - Standardize the default active Gemini model to `gemini-3.1-flash-lite` across `Settings`, `GeminiClient`, `create_llm_client`, `.env.example`, `docker-compose.yml`, and documentation.
+  - Wire `RetryingLLMClient` with configurable `MAX_RETRIES` (default 3) and exponential backoff into `create_llm_client_from_settings()`.
+- **Consequences**:
+  - Eliminates 400 Invalid Argument errors on multi-turn ReAct tool execution with Gemini.
+  - Consistent model behavior across local, containerized, and CI environments.
+  - Automatic resilience against transient 429 quota exhaustion and 5xx network spikes.
+
+
