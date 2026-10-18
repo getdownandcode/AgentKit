@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import fakeredis.aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from agentkit.api.main import create_app
 from agentkit.api.ratelimit import RateLimiter
@@ -25,6 +26,13 @@ async def fake_redis() -> AsyncIterator[Redis[Any]]:
         await aclose_fn()
     else:
         await client.close()
+
+
+class UnreachableRedis:
+    """Minimal Redis stand-in whose connection is always refused."""
+
+    async def eval(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RedisConnectionError("Connection refused")
 
 
 @pytest.mark.asyncio
@@ -113,3 +121,48 @@ async def test_rate_limit_api_endpoint_429_with_headers(fake_redis: Redis[Any]) 
         assert "Retry-After" in res3.headers
         data = res3.json()
         assert data["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_falls_back_to_memory_when_redis_unreachable() -> None:
+    """A refused Redis connection degrades to the in-memory window instead of raising."""
+    limiter = RateLimiter(requests_per_window=2, window_seconds=10)
+    key = "ak_unreachable_key"
+    unreachable = cast("Redis[Any]", UnreachableRedis())
+
+    base_time = 3000.0
+    with patch("time.time", return_value=base_time):
+        await limiter.check(key=key, redis_client=unreachable)
+        await limiter.check(key=key, redis_client=unreachable)
+        with pytest.raises(RateLimitExceededError) as exc_info:
+            await limiter.check(key=key, redis_client=unreachable)
+        assert exc_info.value.retry_after > 0
+
+    with patch("time.time", return_value=base_time + 11.0):
+        await limiter.check(key=key, redis_client=unreachable)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_endpoint_degrades_to_memory_during_redis_outage() -> None:
+    """Endpoints keep serving and enforcing limits while Redis is unreachable."""
+    test_settings = Settings(
+        API_KEYS="test_api_key_unreachable",
+        RATE_LIMIT_PER_MIN=2,
+    )
+    app = create_app(settings=test_settings)
+    app.state.redis_client = cast("Redis[Any]", UnreachableRedis())
+
+    transport = ASGITransport(app=app)
+    headers = {"X-API-Key": "test_api_key_unreachable"}
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res1 = await client.get("/tools", headers=headers)
+        assert res1.status_code == 200
+
+        res2 = await client.get("/tools", headers=headers)
+        assert res2.status_code == 200
+
+        res3 = await client.get("/tools", headers=headers)
+        assert res3.status_code == 429
+        assert "Retry-After" in res3.headers
+        assert res3.json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"

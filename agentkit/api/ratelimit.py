@@ -10,7 +10,7 @@ from typing import cast
 
 from fastapi import Depends
 from redis.asyncio import Redis
-from redis.exceptions import ResponseError
+from redis.exceptions import RedisError, ResponseError
 
 from agentkit.api.auth import get_current_settings, verify_api_key
 from agentkit.api.deps import get_redis_client
@@ -83,7 +83,13 @@ class RateLimiter:
         limit: int | None = None,
         window_seconds: int | None = None,
     ) -> None:
-        """Validate whether the key has exceeded its rate limit in the current window."""
+        """Validate whether the key has exceeded its rate limit in the current window.
+
+        Redis is authoritative when a client is supplied. Connection failures degrade
+        to the in-memory window rather than failing the request: a process-local limit
+        is stricter than no limit at all, and it keeps the API serving traffic while
+        Redis is unreachable.
+        """
         now = time.time()
         effective_limit = limit or self.requests_per_window or 30
         effective_window = float(window_seconds or self.window_seconds)
@@ -92,42 +98,59 @@ class RateLimiter:
             redis_key = f"{self.prefix}{key}"
             member = f"{now}:{uuid.uuid4().hex[:8]}"
 
-            admitted, retry_after = await self._check_window(
-                redis_client=redis_client,
-                redis_key=redis_key,
-                now=now,
-                window=effective_window,
-                limit=effective_limit,
-                member=member,
-            )
-
-            if not admitted:
-                logger.warning(
-                    "Rate limit exceeded for key %s (limit: %d). Retry after: %ds",
-                    key[:8] + "...",
-                    effective_limit,
-                    retry_after,
+            try:
+                admitted, retry_after = await self._check_window(
+                    redis_client=redis_client,
+                    redis_key=redis_key,
+                    now=now,
+                    window=effective_window,
+                    limit=effective_limit,
+                    member=member,
                 )
-                raise RateLimitExceededError(retry_after=retry_after)
-        else:
-            # In-memory sliding window fallback
-            active_timestamps = [
-                t for t in self._memory_store.get(key, []) if t > now - effective_window
-            ]
-
-            if len(active_timestamps) >= effective_limit:
-                oldest_score = active_timestamps[0]
-                retry_after = max(1, math.ceil(oldest_score + effective_window - now))
-                self._memory_store[key] = active_timestamps
+            except RedisError as exc:
                 logger.warning(
-                    "In-memory rate limit exceeded for key %s. Retry after: %ds",
-                    key[:8] + "...",
-                    retry_after,
+                    "Redis unavailable (%s); falling back to in-memory rate limiting.",
+                    exc,
                 )
-                raise RateLimitExceededError(retry_after=retry_after)
+            else:
+                if not admitted:
+                    logger.warning(
+                        "Rate limit exceeded for key %s (limit: %d). Retry after: %ds",
+                        key[:8] + "...",
+                        effective_limit,
+                        retry_after,
+                    )
+                    raise RateLimitExceededError(retry_after=retry_after)
+                return
 
-            active_timestamps.append(now)
+        self._check_window_in_memory(
+            key=key,
+            now=now,
+            window=effective_window,
+            limit=effective_limit,
+        )
+
+    def _check_window_in_memory(self, key: str, now: float, window: float, limit: int) -> None:
+        """Enforce the sliding window in process memory and record the new request.
+
+        Used when Redis is not configured or unreachable. Raises RateLimitExceededError
+        if the window is full; otherwise records ``now`` and returns.
+        """
+        active_timestamps = [t for t in self._memory_store.get(key, []) if t > now - window]
+
+        if len(active_timestamps) >= limit:
+            oldest_score = active_timestamps[0]
+            retry_after = max(1, math.ceil(oldest_score + window - now))
             self._memory_store[key] = active_timestamps
+            logger.warning(
+                "In-memory rate limit exceeded for key %s. Retry after: %ds",
+                key[:8] + "...",
+                retry_after,
+            )
+            raise RateLimitExceededError(retry_after=retry_after)
+
+        active_timestamps.append(now)
+        self._memory_store[key] = active_timestamps
 
     async def _check_window(
         self,
