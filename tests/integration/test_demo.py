@@ -150,11 +150,11 @@ def test_build_llm_strict_live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "")
     get_settings.cache_clear()
 
-    # In live mode without key, it must raise ValueError
-    with pytest.raises(ValueError, match="API key for provider 'gemini' is missing"):
+    # In live mode without key, it must exit with a clear CLI error rather than fake an answer.
+    with pytest.raises(SystemExit, match="No API key configured for provider 'gemini'"):
         build_llm(offline=False, provider="gemini")
 
-    with pytest.raises(ValueError, match="API key for provider 'openai' is missing"):
+    with pytest.raises(SystemExit, match="No API key configured for provider 'openai'"):
         build_llm(offline=False, provider="openai")
 
     # In offline or fake mode, it returns FakeLLMClient

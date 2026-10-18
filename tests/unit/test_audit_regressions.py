@@ -25,7 +25,7 @@ from agentkit.api.main import create_app
 from agentkit.api.ratelimit import RateLimiter
 from agentkit.config import Settings
 from agentkit.core.errors import AuthenticationError, ServiceUnavailableError
-from agentkit.core.trace import StepTrace
+from agentkit.core.trace import InMemoryTraceSink, StepTrace
 from agentkit.llm.base import LLMClient, LLMResponse, Message
 from agentkit.llm.retry import RetryingLLMClient
 from agentkit.memory.base import InMemoryMemoryStore, RunRecord
@@ -152,6 +152,10 @@ async def test_agent_reflects_dependency_changes_between_requests() -> None:
 
     app = create_app(settings=Settings(API_KEYS="secret", LLM_PROVIDER="fake"))
     app.state.session_factory = factory
+    # In-memory overrides keep the request path hermetic: strict dependency resolution
+    # (AUD-01) otherwise requires live Redis and PostgreSQL for memory and traces.
+    app.state.memory_store = InMemoryMemoryStore()
+    app.state.trace_sink = InMemoryTraceSink()
     app.state.llm_client = _ProbeLLM("first")
     # No context manager: that would run the lifespan, which opens a real Redis pool.
     client = TestClient(app, raise_server_exceptions=False)

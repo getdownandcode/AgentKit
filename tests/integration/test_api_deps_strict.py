@@ -13,7 +13,7 @@ from agentkit.api.deps import (
 )
 from agentkit.api.main import create_app
 from agentkit.config import Settings
-from agentkit.core.errors import AuthenticationError, ServiceUnavailableError
+from agentkit.core.errors import ServiceUnavailableError
 from agentkit.llm.fake import FakeLLMClient
 
 
@@ -63,14 +63,15 @@ def test_llm_client_does_not_silently_fallback_to_fake() -> None:
         GEMINI_API_KEY="",
     )
     req = MockRequest()
-    # If GEMINI_API_KEY is empty/invalid and ADC fails, it must raise AuthenticationError, not return FakeLLMClient
+    # An empty key must surface as ServiceUnavailableError (503), never a silent FakeLLMClient.
     try:
         client = get_llm_client(req, settings=settings)  # type: ignore[arg-type]
+    except ServiceUnavailableError as exc:
+        assert exc.service == "llm"
+    else:
         assert not isinstance(client, FakeLLMClient), (
             "get_llm_client must not return FakeLLMClient when LLM_PROVIDER is 'gemini'"
         )
-    except AuthenticationError:
-        pass  # Expected authentic error, not swallowed into FakeLLMClient
 
 
 def test_llm_client_returns_fake_when_explicitly_configured() -> None:
