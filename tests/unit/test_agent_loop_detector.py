@@ -4,11 +4,31 @@ import pytest
 
 from agentkit.core.agent import Agent, AgentConfig
 from agentkit.core.errors import DuplicateToolCallLoopError
-from agentkit.core.types import RunStatus
-from agentkit.llm.base import LLMResponse
+from agentkit.core.types import Role, RunStatus
+from agentkit.llm.base import LLMResponse, Message
 from agentkit.llm.fake import FakeLLMClient
+from agentkit.memory.base import InMemoryMemoryStore
 from agentkit.tools.models import ToolCall
 from agentkit.tools.registry import ToolRegistry, tool
+
+
+def _assert_history_is_provider_valid(messages: list[Message]) -> None:
+    """Assert every assistant tool-call id has a matching tool message.
+
+    Mirrors the invariant enforced by OpenAI and Gemini: an assistant turn requesting
+    tool calls must be followed by a tool message for each call id before any other
+    turn appears.
+    """
+    pending: set[str] = set()
+    for msg in messages:
+        if msg.role == Role.TOOL:
+            assert msg.tool_call_id is not None
+            pending.discard(msg.tool_call_id)
+        else:
+            assert not pending, f"Unanswered tool calls before {msg.role} message: {pending}"
+            if msg.role == Role.ASSISTANT:
+                pending = {call.id for call in msg.tool_calls}
+    assert not pending, f"Unanswered tool calls at end of history: {pending}"
 
 
 @pytest.mark.asyncio
@@ -150,3 +170,87 @@ async def test_alternating_tools_do_not_trigger_detector() -> None:
 
     assert result.status == RunStatus.SUCCEEDED
     assert result.final_answer == "Done"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_abort_persists_provider_valid_session_history() -> None:
+    """The unexecuted duplicate call must still get a tool message in the session."""
+    registry = ToolRegistry()
+
+    @tool(registry=registry)
+    def repeat_session(val: int) -> int:
+        """Repeat."""
+        return val
+
+    first_call = ToolCall(id="c1", name="repeat_session", arguments={"val": 42})
+    duplicate_call = ToolCall(id="c2", name="repeat_session", arguments={"val": 42})
+    llm = FakeLLMClient(
+        responses=[
+            LLMResponse(text="Repeat 1", tool_calls=[first_call]),
+            LLMResponse(text="Repeat 2", tool_calls=[duplicate_call]),
+        ]
+    )
+    memory = InMemoryMemoryStore()
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        memory=memory,
+        config=AgentConfig(max_steps=5, max_consecutive_duplicate_tool_calls=2),
+    )
+
+    result = await agent.run(goal="Loop with session", session_id="sess-loop")
+
+    assert result.status == RunStatus.FAILED
+
+    messages = await memory.get_messages("sess-loop")
+    _assert_history_is_provider_valid(messages)
+
+    tool_message = next(m for m in messages if m.tool_call_id == "c2")
+    assert "aborted" in tool_message.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_abort_mid_batch_answers_remaining_calls() -> None:
+    """Aborting partway through a multi-call turn must not drop the later call ids."""
+    registry = ToolRegistry()
+
+    @tool(registry=registry)
+    def echo_tool(v: int) -> int:
+        """Echo value."""
+        return v
+
+    llm = FakeLLMClient(
+        responses=[
+            LLMResponse(
+                text="Setup call",
+                tool_calls=[ToolCall(id="c_setup", name="echo_tool", arguments={"v": 1})],
+            ),
+            LLMResponse(
+                text="Batch with a repeat",
+                tool_calls=[
+                    ToolCall(id="c_batch_1", name="echo_tool", arguments={"v": 2}),
+                    ToolCall(id="c_batch_2", name="echo_tool", arguments={"v": 2}),
+                ],
+            ),
+        ]
+    )
+    memory = InMemoryMemoryStore()
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        memory=memory,
+        config=AgentConfig(max_steps=5, max_consecutive_duplicate_tool_calls=2),
+    )
+
+    result = await agent.run(goal="Loop mid batch", session_id="sess-mid-batch")
+
+    assert result.status == RunStatus.FAILED
+
+    messages = await memory.get_messages("sess-mid-batch")
+    _assert_history_is_provider_valid(messages)
+
+    executed = next(m for m in messages if m.tool_call_id == "c_batch_1")
+    assert executed.content == "2"
+
+    interrupted = next(m for m in messages if m.tool_call_id == "c_batch_2")
+    assert "aborted" in interrupted.content.lower()

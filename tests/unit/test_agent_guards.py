@@ -6,11 +6,31 @@ import pytest
 
 from agentkit.core.agent import Agent, AgentConfig
 from agentkit.core.errors import MaxStepsExceeded, RunTimeoutError
-from agentkit.core.types import RunStatus
-from agentkit.llm.base import LLMResponse, TokenUsage
+from agentkit.core.types import Role, RunStatus
+from agentkit.llm.base import LLMResponse, Message, TokenUsage
 from agentkit.llm.fake import FakeLLMClient
+from agentkit.memory.base import InMemoryMemoryStore
 from agentkit.tools.models import ToolCall
 from agentkit.tools.registry import ToolRegistry, tool
+
+
+def _assert_history_is_provider_valid(messages: list[Message]) -> None:
+    """Assert every assistant tool-call id has a matching tool message.
+
+    Mirrors the invariant enforced by OpenAI and Gemini: an assistant turn requesting
+    tool calls must be followed by a tool message for each call id before any other
+    turn appears.
+    """
+    pending: set[str] = set()
+    for msg in messages:
+        if msg.role == Role.TOOL:
+            assert msg.tool_call_id is not None
+            pending.discard(msg.tool_call_id)
+        else:
+            assert not pending, f"Unanswered tool calls before {msg.role} message: {pending}"
+            if msg.role == Role.ASSISTANT:
+                pending = {call.id for call in msg.tool_calls}
+    assert not pending, f"Unanswered tool calls at end of history: {pending}"
 
 
 @pytest.mark.asyncio
@@ -166,3 +186,50 @@ async def test_agent_raises_unexpected_exception_when_flag_enabled() -> None:
     agent = Agent(llm=llm, registry=registry)
     with pytest.raises(RuntimeError):
         await agent.run(goal="Handle crash", raise_on_failure=True)
+
+
+@pytest.mark.asyncio
+async def test_run_timeout_persists_provider_valid_session_history() -> None:
+    """A run aborted mid-tool must not leave an unanswered assistant tool-call turn."""
+    registry = ToolRegistry()
+
+    @tool(registry=registry)
+    async def slow_tool_session(delay: float) -> str:
+        """Slow async tool."""
+        await asyncio.sleep(delay)
+        return "done"
+
+    llm = FakeLLMClient(
+        responses=[
+            LLMResponse(
+                text="Calling slow tool",
+                tool_calls=[
+                    ToolCall(id="c_timeout", name="slow_tool_session", arguments={"delay": 0.2})
+                ],
+            )
+        ]
+    )
+    memory = InMemoryMemoryStore()
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        memory=memory,
+        config=AgentConfig(max_steps=5, run_timeout_s=0.05, tool_timeout_s=1.0),
+    )
+
+    result = await agent.run(goal="Test session timeout", session_id="sess-timeout")
+
+    assert result.status == RunStatus.TIMED_OUT
+
+    messages = await memory.get_messages("sess-timeout")
+    _assert_history_is_provider_valid(messages)
+
+    tool_message = next(m for m in messages if m.tool_call_id == "c_timeout")
+    assert "aborted" in tool_message.content.lower()
+
+    # The session must remain usable for a follow-up run.
+    llm.queue_text("Recovered after timeout.")
+    follow_up = await agent.run(goal="Continue after timeout", session_id="sess-timeout")
+
+    assert follow_up.status == RunStatus.SUCCEEDED
+    assert follow_up.final_answer == "Recovered after timeout."

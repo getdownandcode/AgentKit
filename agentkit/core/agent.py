@@ -74,6 +74,46 @@ class RunResult(BaseModel):
     duration_ms: int = Field(default=0, ge=0, description="Execution time in milliseconds.")
 
 
+_ABORTED_TOOL_RESULT_CONTENT = (
+    "ERROR: tool execution was aborted before completion; result unavailable."
+)
+
+
+def _repair_trailing_tool_calls(messages: list[Message]) -> None:
+    """Answer tool calls left unanswered by an aborted run.
+
+    Providers reject histories in which an assistant tool-call turn is not followed by
+    a tool message for every call id (OpenAI returns a 400; Gemini requires a matching
+    function response). A run-level timeout, duplicate-loop abort, or unexpected error
+    can terminate the run after the assistant turn was recorded but before all results
+    were appended. Synthetic error results keep the persisted history valid so the next
+    run in the session can proceed and retry the failed call.
+    """
+    answered: set[str] = set()
+    index = len(messages) - 1
+    while index >= 0 and messages[index].role == Role.TOOL:
+        tool_call_id = messages[index].tool_call_id
+        if tool_call_id is not None:
+            answered.add(tool_call_id)
+        index -= 1
+
+    if index < 0:
+        return
+
+    assistant_message = messages[index]
+    if assistant_message.role != Role.ASSISTANT or not assistant_message.tool_calls:
+        return
+
+    for call in assistant_message.tool_calls:
+        if call.id not in answered:
+            messages.append(
+                Message.tool_result(
+                    tool_call_id=call.id,
+                    content=_ABORTED_TOOL_RESULT_CONTENT,
+                )
+            )
+
+
 class Agent:
     """Core autonomous agent coordinating ReAct reasoning loops."""
 
@@ -113,6 +153,7 @@ class Agent:
 
             async def _finalize_and_return(result: RunResult) -> RunResult:
                 if session_id and self.memory is not None and hasattr(self.memory, "save_messages"):
+                    _repair_trailing_tool_calls(messages)
                     with contextlib.suppress(Exception):
                         await self.memory.save_messages(session_id, messages)
 
