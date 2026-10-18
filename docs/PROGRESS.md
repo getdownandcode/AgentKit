@@ -59,6 +59,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUD-07  | AUD       | Gemini Multi-Turn Role Specification & Active Model Standard | `feat/gemini-tool-calling-fix` | #51 | 2 | Done | Updated function response to role user and default model to gemini-3.1-flash-lite |
 | AUD-08  | AUD       | Expose Configurable Timeout in Docker Compose | `fix/docker-compose-timeout` | #52 | 2 | Done | Exposed RUN_TIMEOUT_S in docker-compose.yml |
 | AUD-09  | AUD       | Live End-to-End Infrastructure Verification & Documentation Proof | `docs/e2e-verification-report` | #53 | 3 | Done | Standardized model, verified live stack, and documented in E2E_REPORT.md |
+| AUD-10  | AUD       | Rate Limiter Outage Fallback & Provider-Valid Session History | `fix/ratelimit-and-session-repair` | #56 | 3 | Done | In-memory fallback on Redis connection failures; synthetic tool results repair aborted sessions |
 
 
 ---
@@ -393,4 +394,10 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #53
 - **Commits**: 3
 - **Notes**: Standardized on `gemini-3.1-flash-lite` across application settings, adapter, factory, compose, and documentation. Authored `docs/E2E_REPORT.md` capturing verbatim live outputs for healthcheck, tool discovery, multi-step analytical SQL join + calculator tax calculation ($3,200 / $3,472), Postgres durable row persistence in `runs` and `steps`, and 7 edge cases (unknown tool, bad arguments, division by zero, max steps exceeded, 429 rate limit with Retry-After, SQL injection blocking, and path traversal blocking). Updated `README.md`.
+
+### AUD-10: Rate Limiter Outage Fallback & Provider-Valid Session History
+- **Status**: Done
+- **PR**: #56
+- **Commits**: 3
+- **Notes**: A full-project review (issue #55) surfaced two medium-severity bugs. `RateLimiter.check` only caught `ResponseError`, so a real Redis outage (`ConnectionError` / `TimeoutError`) escaped the dependency and returned HTTP 500; it now catches `RedisError`, logs a warning, and degrades to the in-memory sliding window, extracted into `_check_window_in_memory`. `Agent._finalize_and_return` could persist histories whose trailing assistant turn requested tool calls with no matching tool messages when a run timed out mid-tool or the duplicate-loop guard aborted mid-batch, which OpenAI and Gemini reject on the next run in that session; `_repair_trailing_tool_calls` now appends synthetic error results for unanswered call ids before saving, on every terminal path. Added regression tests in `tests/unit/test_api_ratelimit.py`, `tests/unit/test_agent_guards.py`, and `tests/unit/test_agent_loop_detector.py`, each confirmed to fail pre-fix.
 
