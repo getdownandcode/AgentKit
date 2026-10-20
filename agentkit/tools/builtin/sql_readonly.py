@@ -65,6 +65,15 @@ _EXISTING_BOUND_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+#: Regex matching a LIMIT clause with count, ALL, or NULL.
+_LIMIT_BOUND_REGEX = re.compile(r"\blimit\s+(\d+|all|null)\b", re.IGNORECASE)
+
+#: Regex matching a FETCH FIRST/NEXT clause.
+_FETCH_BOUND_REGEX = re.compile(
+    r"\bfetch\s+(first|next)\s*(?:(\d+|all|null)\s+)?(rows?)\s+(only|with\s+ties)\b",
+    re.IGNORECASE,
+)
+
 #: Process-wide engine, created on first use. Connection pools are expensive to rebuild and
 #: are safe to share, but the engine is still injectable per call so tests and alternative
 #: deployments can supply their own without mutating module state.
@@ -161,7 +170,7 @@ def _mask_literals(sql: str) -> str:
         char = sql[index]
 
         if char == "'":
-            masked.append(" ")
+            start = index
             index += 1
             while index < length:
                 if sql[index] == "'":
@@ -172,10 +181,11 @@ def _mask_literals(sql: str) -> str:
                     index += 1
                     break
                 index += 1
+            masked.append(" " * (index - start))
             continue
 
         if char == '"':
-            masked.append(" ")
+            start = index
             index += 1
             while index < length:
                 if sql[index] == '"':
@@ -185,6 +195,7 @@ def _mask_literals(sql: str) -> str:
                     index += 1
                     break
                 index += 1
+            masked.append(" " * (index - start))
             continue
 
         masked.append(char)
@@ -266,13 +277,8 @@ async def _apply_statement_timeout(conn: AsyncConnection, timeout_s: float) -> N
         logger.warning("Could not apply server-side statement timeout: %s", exc)
 
 
-def _top_level_tail(masked_sql: str) -> str:
-    """Return the trailing top-level clause of a masked statement.
-
-    Clause keywords are only meaningful at parenthesis depth zero: a LIMIT inside a subquery
-    does not bound the outer statement. Parenthesis counting on the literal-masked text is
-    exact for real queries, since quoted parentheses are already blanked out.
-    """
+def _top_level_tail_index(masked_sql: str) -> int:
+    """Return the start index of the trailing top-level clause in a masked statement."""
     depth = 0
     tail_start = 0
     for index, char in enumerate(masked_sql):
@@ -283,26 +289,87 @@ def _top_level_tail(masked_sql: str) -> str:
             if depth <= 0:
                 depth = 0
                 tail_start = index + 1
-    return masked_sql[tail_start:]
+    return tail_start
+
+
+def _top_level_tail(masked_sql: str) -> str:
+    """Return the trailing top-level clause of a masked statement.
+
+    Clause keywords are only meaningful at parenthesis depth zero: a LIMIT inside a subquery
+    does not bound the outer statement. Parenthesis counting on the literal-masked text is
+    exact for real queries, since quoted parentheses are already blanked out.
+    """
+    return masked_sql[_top_level_tail_index(masked_sql) :]
 
 
 def _apply_row_limit(sql: str, row_limit: int) -> str:
-    """Bound the statement's output in SQL, preferring an appended LIMIT.
+    """Bound the statement's output in SQL, preferring an appended or clamped LIMIT.
 
     Appending ``LIMIT`` leaves an already-valid statement untouched in shape, so constructs
-    like duplicate output column names in a JOIN keep working exactly as written. Only two
-    cases need different handling, both detected on the trailing top-level clause:
+    like duplicate output column names in a JOIN keep working exactly as written.
+    Top-level bounds are handled as follows:
 
-    - the statement already bounds itself (LIMIT / FETCH FIRST): executed untouched;
-    - the statement ends in a row-locking clause (FOR UPDATE / FOR SHARE), after which a
-      LIMIT cannot legally appear: wrapped in a limited subquery instead.
+    - if the statement already bounds itself (LIMIT / FETCH FIRST), caller-supplied bounds
+      larger than ``row_limit`` (or unbounded forms like LIMIT ALL / LIMIT NULL) are clamped
+      down to ``row_limit``, while smaller bounds are preserved;
+    - if the statement ends in a row-locking clause (FOR UPDATE / FOR SHARE) without a LIMIT,
+      after which a LIMIT cannot legally appear: wrapped in a limited subquery instead;
+    - otherwise: a LIMIT clause is appended directly.
     """
-    tail = _top_level_tail(_mask_literals(sql))
-    if _EXISTING_BOUND_REGEX.search(tail):
-        return sql
-    if _LOCKING_CLAUSE_REGEX.search(tail):
-        return f"SELECT * FROM ({sql}) AS agentkit_limited_query LIMIT {int(row_limit)}"
-    return f"{sql} LIMIT {int(row_limit)}"
+    row_limit = int(row_limit)
+    masked = _mask_literals(sql)
+    tail_start = _top_level_tail_index(masked)
+    head = sql[:tail_start]
+    tail = sql[tail_start:]
+    masked_tail = masked[tail_start:]
+
+    # Check for top-level LIMIT
+    limit_match = _LIMIT_BOUND_REGEX.search(masked_tail)
+    if limit_match:
+        val_str = limit_match.group(1).lower()
+        if val_str in ("all", "null"):
+            new_tail = (
+                tail[: limit_match.start()] + f"LIMIT {row_limit}" + tail[limit_match.end() :]
+            )
+            return head + new_tail
+        try:
+            val_int = int(val_str)
+            if val_int > row_limit:
+                new_tail = (
+                    tail[: limit_match.start()] + f"LIMIT {row_limit}" + tail[limit_match.end() :]
+                )
+                return head + new_tail
+            return sql
+        except ValueError:
+            return sql
+
+    # Check for top-level FETCH FIRST / NEXT
+    fetch_match = _FETCH_BOUND_REGEX.search(masked_tail)
+    if fetch_match:
+        direction = fetch_match.group(1)
+        count_str = fetch_match.group(2)
+        row_keyword = fetch_match.group(3)
+        tie_clause = fetch_match.group(4)
+
+        if count_str is None or count_str.lower() in ("all", "null"):
+            new_bound = f"FETCH {direction} {row_limit} {row_keyword} {tie_clause}"
+            new_tail = tail[: fetch_match.start()] + new_bound + tail[fetch_match.end() :]
+            return head + new_tail
+        try:
+            val_int = int(count_str)
+            if val_int > row_limit:
+                new_bound = f"FETCH {direction} {row_limit} {row_keyword} {tie_clause}"
+                new_tail = tail[: fetch_match.start()] + new_bound + tail[fetch_match.end() :]
+                return head + new_tail
+            return sql
+        except ValueError:
+            return sql
+
+    # Check for top-level locking clause (e.g. FOR UPDATE)
+    if _LOCKING_CLAUSE_REGEX.search(masked_tail):
+        return f"SELECT * FROM ({sql}) AS agentkit_limited_query LIMIT {row_limit}"
+
+    return f"{sql} LIMIT {row_limit}"
 
 
 @tool

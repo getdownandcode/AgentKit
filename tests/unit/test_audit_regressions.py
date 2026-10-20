@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import fakeredis.aioredis
 import pytest
@@ -505,6 +505,116 @@ def test_row_limit_rewrite_prefers_appending_over_wrapping() -> None:
     assert _apply_row_limit("SELECT * FROM t LIMIT 5", 50) == "SELECT * FROM t LIMIT 5"
     wrapped = _apply_row_limit("SELECT * FROM t FOR UPDATE", 50)
     assert "agentkit_limited_query" in wrapped and wrapped.endswith("LIMIT 50")
+
+
+def test_row_limit_clamps_oversized_and_unbounded_clauses() -> None:
+    """AUDIT-02: LIMIT ALL, LIMIT NULL, oversized limits and FETCH FIRST must be clamped."""
+    from agentkit.tools.builtin.sql_readonly import _apply_row_limit
+
+    # 1. LIMIT ALL and LIMIT NULL are replaced with configured row_limit
+    assert _apply_row_limit("SELECT * FROM runs LIMIT ALL", 50) == "SELECT * FROM runs LIMIT 50"
+    assert _apply_row_limit("SELECT * FROM runs LIMIT NULL", 50) == "SELECT * FROM runs LIMIT 50"
+
+    # 2. Oversized limits are clamped down to configured row_limit
+    assert (
+        _apply_row_limit("SELECT * FROM runs LIMIT 1000000000", 50) == "SELECT * FROM runs LIMIT 50"
+    )
+    assert _apply_row_limit("SELECT * FROM runs LIMIT 100", 50) == "SELECT * FROM runs LIMIT 50"
+
+    # 3. Smaller limits are preserved untouched
+    assert _apply_row_limit("SELECT * FROM runs LIMIT 5", 50) == "SELECT * FROM runs LIMIT 5"
+    assert _apply_row_limit("SELECT * FROM runs LIMIT 50", 50) == "SELECT * FROM runs LIMIT 50"
+
+    # 4. LIMIT with OFFSET
+    assert (
+        _apply_row_limit("SELECT * FROM runs LIMIT 100 OFFSET 10", 50)
+        == "SELECT * FROM runs LIMIT 50 OFFSET 10"
+    )
+    assert (
+        _apply_row_limit("SELECT * FROM runs OFFSET 10 LIMIT 100", 50)
+        == "SELECT * FROM runs OFFSET 10 LIMIT 50"
+    )
+
+    # 5. FETCH FIRST / NEXT clauses
+    assert (
+        _apply_row_limit("SELECT * FROM runs FETCH FIRST 100 ROWS ONLY", 50)
+        == "SELECT * FROM runs FETCH FIRST 50 ROWS ONLY"
+    )
+    assert (
+        _apply_row_limit("SELECT * FROM runs FETCH FIRST 5 ROWS ONLY", 50)
+        == "SELECT * FROM runs FETCH FIRST 5 ROWS ONLY"
+    )
+    assert (
+        _apply_row_limit("SELECT * FROM runs FETCH FIRST ROWS ONLY", 50)
+        == "SELECT * FROM runs FETCH FIRST 50 ROWS ONLY"
+    )
+    assert (
+        _apply_row_limit("SELECT * FROM runs FETCH NEXT 100 ROWS ONLY", 50)
+        == "SELECT * FROM runs FETCH NEXT 50 ROWS ONLY"
+    )
+
+    # 6. LIMIT inside a subquery is preserved; outer statement is bounded
+    subquery_no_outer_limit = "SELECT * FROM (SELECT * FROM t LIMIT 10) AS sub"
+    assert (
+        _apply_row_limit(subquery_no_outer_limit, 50)
+        == "SELECT * FROM (SELECT * FROM t LIMIT 10) AS sub LIMIT 50"
+    )
+
+    subquery_with_oversized_outer_limit = (
+        "SELECT * FROM (SELECT * FROM t LIMIT 10) AS sub LIMIT 100"
+    )
+    assert (
+        _apply_row_limit(subquery_with_oversized_outer_limit, 50)
+        == "SELECT * FROM (SELECT * FROM t LIMIT 10) AS sub LIMIT 50"
+    )
+
+    # 7. Locking clauses with LIMIT
+    assert (
+        _apply_row_limit("SELECT * FROM t LIMIT 100 FOR UPDATE", 50)
+        == "SELECT * FROM t LIMIT 50 FOR UPDATE"
+    )
+    assert (
+        _apply_row_limit("SELECT * FROM t LIMIT 5 FOR UPDATE", 50)
+        == "SELECT * FROM t LIMIT 5 FOR UPDATE"
+    )
+    assert (
+        _apply_row_limit("SELECT * FROM t LIMIT ALL FOR UPDATE", 50)
+        == "SELECT * FROM t LIMIT 50 FOR UPDATE"
+    )
+
+    # 8. Literals containing the word 'limit' must not be confused with SQL clause
+    literal_query = "SELECT * FROM t WHERE note = 'limit all' LIMIT 100"
+    assert (
+        _apply_row_limit(literal_query, 50) == "SELECT * FROM t WHERE note = 'limit all' LIMIT 50"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_enforces_limit_server_side() -> None:
+    """AUDIT-02: verify conn.execute() receives the clamped LIMIT in SQL."""
+    from agentkit.tools.builtin.sql_readonly import execute_sql_query
+
+    mock_engine = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cursor = MagicMock()
+    mock_cursor.keys.return_value = ["id", "val"]
+    mock_cursor.fetchmany.return_value = [(1, "test")]
+    mock_conn.execute.return_value = mock_cursor
+
+    @asynccontextmanager
+    async def _mock_connect() -> AsyncIterator[Any]:
+        yield mock_conn
+
+    mock_engine.connect = _mock_connect
+
+    await execute_sql_query("SELECT * FROM runs LIMIT ALL", engine=mock_engine, row_limit=50)
+
+    # Inspect the exact SQL text passed to conn.execute
+    executed_statements = [str(call.args[0]) for call in mock_conn.execute.call_args_list]
+    query_statements = [s for s in executed_statements if s.startswith("SELECT")]
+    assert len(query_statements) == 1
+    assert query_statements[0] == "SELECT * FROM runs LIMIT 50"
+    assert "LIMIT ALL" not in query_statements[0]
 
 
 # --- seed script: statement-aware splitting -------------------------------------------------
