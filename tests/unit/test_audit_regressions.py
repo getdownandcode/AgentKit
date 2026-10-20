@@ -23,9 +23,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from agentkit.api.deps import get_llm_client
 from agentkit.api.main import create_app
 from agentkit.api.ratelimit import RateLimiter
+from agentkit.api.schemas import (
+    SESSION_ID_MAX_LENGTH as API_SESSION_ID_MAX_LENGTH,
+)
+from agentkit.api.schemas import (
+    RunCreateRequest,
+)
 from agentkit.config import Settings
 from agentkit.core.errors import AuthenticationError, ServiceUnavailableError
 from agentkit.core.trace import InMemoryTraceSink, StepTrace
+from agentkit.db.models import (
+    SESSION_ID_MAX_LENGTH as DB_SESSION_ID_MAX_LENGTH,
+)
+from agentkit.db.models import (
+    Base,
+    Run,
+)
 from agentkit.llm.base import LLMClient, LLMResponse, Message
 from agentkit.llm.retry import RetryingLLMClient
 from agentkit.memory.base import InMemoryMemoryStore, RunRecord
@@ -590,3 +603,117 @@ async def test_unatomic_fallback_does_not_over_admit_under_concurrency() -> None
     assert not errors, f"unexpected exceptions: {errors}"
     assert len(admitted) == 5, f"expected exactly 5 admissions, got {len(admitted)}"
     assert len(denied) == 15
+
+
+# --- AUDIT-09: session_id bounded at API boundary and matching DB column -------------
+
+
+def test_session_id_db_and_api_max_length_aligned() -> None:
+    """AUDIT-09: DB column length and API request schema max_length must match exactly."""
+    col_length = Run.__table__.c.session_id.type.length
+    assert col_length == 255
+    assert DB_SESSION_ID_MAX_LENGTH == 255
+    assert API_SESSION_ID_MAX_LENGTH == 255
+
+    schema_max_length = next(
+        m.max_length
+        for m in RunCreateRequest.model_fields["session_id"].metadata
+        if hasattr(m, "max_length")
+    )
+    assert schema_max_length == col_length == 255
+
+
+@pytest.mark.asyncio
+async def test_session_id_over_long_rejected_at_api_boundary() -> None:
+    """AUDIT-09: Over-long session_id (>255 chars) must return 422 before agent execution."""
+    agent_called = False
+
+    class _GuardedLLM(LLMClient):
+        async def chat(self, _messages: list[Message]) -> LLMResponse:
+            nonlocal agent_called
+            agent_called = True
+            return LLMResponse(text="should not be reached")
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    mem_store = InMemoryMemoryStore()
+    app = create_app(settings=Settings(API_KEYS="secret", LLM_PROVIDER="fake"))
+    app.state.session_factory = factory
+    app.state.memory_store = mem_store
+    app.state.trace_sink = InMemoryTraceSink()
+    app.state.llm_client = _GuardedLLM()
+
+    client = TestClient(app, raise_server_exceptions=False)
+    headers = {"X-API-Key": "secret"}
+
+    # 256 characters session_id
+    overlong_id = "s" * 256
+    resp = client.post(
+        "/runs",
+        json={"goal": "test goal", "session_id": overlong_id},
+        headers=headers,
+    )
+
+    assert resp.status_code == 422
+    data = resp.json()
+    assert data["error"]["code"] == "VALIDATION_ERROR"
+    assert not agent_called
+    assert len(mem_store._runs) == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_session_id_max_boundary_accepted_and_roundtrips() -> None:
+    """AUDIT-09: A 255-character session_id is accepted and persisted across DB and memory."""
+    from agentkit.memory.pg_store import PostgresMemoryStore
+    from agentkit.memory.redis_store import RedisMemoryStore
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    pg_store = PostgresMemoryStore(factory)
+    fake_redis: Redis[Any] = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    redis_store = RedisMemoryStore(fake_redis)
+    tiered = TieredMemoryStore(session_store=redis_store, run_store=pg_store)
+
+    class _EchoLLM(LLMClient):
+        async def chat(self, _messages: list[Message]) -> LLMResponse:
+            return LLMResponse(text="Echo response")
+
+    app = create_app(settings=Settings(API_KEYS="secret", LLM_PROVIDER="fake"))
+    app.state.session_factory = factory
+    app.state.memory_store = tiered
+    app.state.trace_sink = InMemoryTraceSink()
+    app.state.llm_client = _EchoLLM()
+
+    client = TestClient(app, raise_server_exceptions=False)
+    headers = {"X-API-Key": "secret"}
+
+    valid_boundary_id = "a" * 255
+    resp = client.post(
+        "/runs",
+        json={"goal": "test goal", "session_id": valid_boundary_id},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200, resp.text
+    run_data = resp.json()
+    assert run_data["session_id"] == valid_boundary_id
+
+    # Verify DB persistence
+    stored_run = await pg_store.get_run(run_data["run_id"])
+    assert stored_run is not None
+    assert stored_run.session_id == valid_boundary_id
+
+    # Verify Redis persistence
+    session_messages = await redis_store.get_messages(valid_boundary_id)
+    assert len(session_messages) > 0
+
+    await fake_redis.aclose()
+    await engine.dispose()

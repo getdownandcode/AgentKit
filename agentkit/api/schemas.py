@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+SESSION_ID_MAX_LENGTH: int = 255
+
 
 class RunCreateRequest(BaseModel):
     """Payload to initiate a new agent execution run."""
@@ -14,6 +16,7 @@ class RunCreateRequest(BaseModel):
     goal: str = Field(..., min_length=1, description="Goal or task description for the agent.")
     session_id: str | None = Field(
         default=None,
+        max_length=SESSION_ID_MAX_LENGTH,
         description="Optional conversation session ID to preserve context across multiple runs.",
     )
 

@@ -12,6 +12,9 @@ class Base(DeclarativeBase):
     """Base class for all SQLAlchemy declarative models."""
 
 
+SESSION_ID_MAX_LENGTH: int = 255
+
+
 class Run(Base):
     """Represents an agent execution run."""
 
@@ -23,7 +26,7 @@ class Run(Base):
         default=uuid.uuid4,
     )
     session_id: Mapped[str | None] = mapped_column(
-        String(255),
+        String(SESSION_ID_MAX_LENGTH),
         nullable=True,
         index=True,
     )

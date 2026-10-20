@@ -65,6 +65,13 @@ def test_runs_validation_error() -> None:
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
+    # Over-long session_id (> 255 chars)
+    resp = client.post(
+        "/runs", json={"goal": "calculate 2+2", "session_id": "x" * 256}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
 
 @pytest.mark.asyncio
 async def test_create_and_query_run_lifecycle(
