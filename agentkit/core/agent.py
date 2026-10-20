@@ -51,6 +51,16 @@ class AgentConfig(BaseModel):
         gt=0,
         description="Halt run if identical tool calls are repeated consecutively.",
     )
+    max_duplicate_tool_call_cycles: int | None = Field(
+        default=None,
+        gt=0,
+        description="Halt run if a repeating cycle of tool calls is detected this many times. Defaults to max_consecutive_duplicate_tool_calls.",
+    )
+    max_tool_cycle_length: int = Field(
+        default=5,
+        gt=0,
+        description="Maximum cycle length (in tool calls) inspected by the loop detector.",
+    )
     system_prompt: str = Field(
         default=DEFAULT_SYSTEM_PROMPT,
         description="System directive prepended to every run.",
@@ -192,8 +202,7 @@ class Agent:
             total_input_tokens = 0
             total_output_tokens = 0
             steps_count = 0
-            last_tool_signature: tuple[str, str] | None = None
-            consecutive_duplicate_count = 0
+            tool_call_signatures: list[tuple[str, str]] = []
 
             try:
                 async with asyncio.timeout(self.config.run_timeout_s):
@@ -218,33 +227,59 @@ class Agent:
                             for call in response.tool_calls:
                                 args_json = json.dumps(call.arguments, sort_keys=True, default=str)
                                 sig = (call.name, args_json)
-                                if sig == last_tool_signature:
-                                    consecutive_duplicate_count += 1
-                                else:
-                                    last_tool_signature = sig
-                                    consecutive_duplicate_count = 1
+                                tool_call_signatures.append(sig)
 
-                                if (
-                                    consecutive_duplicate_count
-                                    >= self.config.max_consecutive_duplicate_tool_calls
-                                ):
+                                # Check for repeating cycle or consecutive duplicates
+                                detected_loop: tuple[int, int] | None = None
+                                max_cycle_len = min(
+                                    self.config.max_tool_cycle_length,
+                                    len(tool_call_signatures),
+                                )
+                                for plen in range(1, max_cycle_len + 1):
+                                    threshold = (
+                                        self.config.max_consecutive_duplicate_tool_calls
+                                        if plen == 1
+                                        else (
+                                            self.config.max_duplicate_tool_call_cycles
+                                            or self.config.max_consecutive_duplicate_tool_calls
+                                        )
+                                    )
+                                    window_len = plen * threshold
+                                    if len(tool_call_signatures) >= window_len:
+                                        suffix = tool_call_signatures[-window_len:]
+                                        pattern = suffix[:plen]
+                                        if pattern * threshold == suffix:
+                                            detected_loop = (plen, threshold)
+                                            break
+
+                                if detected_loop is not None:
+                                    plen, count = detected_loop
                                     duration_ms = max(
                                         0, int((time.perf_counter() - start_time) * 1000)
                                     )
-                                    logger.warning(
-                                        "Detected duplicate tool call loop for '%s' (%d consecutive calls)",
-                                        call.name,
-                                        consecutive_duplicate_count,
-                                    )
+                                    if plen == 1:
+                                        fail_msg = (
+                                            f"Detected duplicate tool call loop: '{call.name}' called "
+                                            f"{count} consecutive times with identical arguments: {call.arguments}"
+                                        )
+                                    else:
+                                        pattern_names = [
+                                            name
+                                            for name, _ in tool_call_signatures[
+                                                -plen * count : -plen * (count - 1)
+                                            ]
+                                        ]
+                                        fail_msg = (
+                                            f"Detected duplicate tool call loop: repeating cycle of {plen} tool calls "
+                                            f"({' -> '.join(pattern_names)}) repeated {count} times"
+                                        )
+                                    logger.warning("%s", fail_msg)
                                     res = RunResult(
                                         run_id=run_id,
                                         session_id=session_id,
                                         goal=goal,
                                         status=RunStatus.FAILED,
-                                        failure_reason=(
-                                            f"Detected duplicate tool call loop: '{call.name}' called "
-                                            f"{consecutive_duplicate_count} consecutive times with identical arguments: {call.arguments}"
-                                        ),
+                                        failure_reason=fail_msg,
                                         steps_count=steps_count,
                                         total_input_tokens=total_input_tokens,
                                         total_output_tokens=total_output_tokens,
@@ -253,7 +288,7 @@ class Agent:
                                     await _finalize_and_return(res)
                                     if raise_on_failure:
                                         raise DuplicateToolCallLoopError(
-                                            call.name, consecutive_duplicate_count
+                                            call.name, count, cycle_length=plen
                                         )
                                     return res
 

@@ -41,13 +41,18 @@ class RunTimeoutError(AgentKitError):
 class DuplicateToolCallLoopError(AgentKitError):
     """Raised when an agent run enters a repetitive loop calling identical tools with identical arguments."""
 
-    def __init__(self, tool_name: str, count: int) -> None:
+    def __init__(self, tool_name: str, count: int, cycle_length: int = 1) -> None:
+        if cycle_length > 1:
+            msg = f"Detected duplicate tool call loop: repeating cycle of {cycle_length} tool calls repeated {count} times."
+        else:
+            msg = f"Detected duplicate tool call loop: '{tool_name}' called {count} consecutive times with identical arguments."
         super().__init__(
-            f"Detected duplicate tool call loop: '{tool_name}' called {count} consecutive times with identical arguments.",
+            msg,
             code="DUPLICATE_TOOL_CALL_LOOP",
         )
         self.tool_name = tool_name
         self.count = count
+        self.cycle_length = cycle_length
 
 
 class AuthenticationError(AgentKitError):

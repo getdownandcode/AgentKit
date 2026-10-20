@@ -254,3 +254,120 @@ async def test_duplicate_abort_mid_batch_answers_remaining_calls() -> None:
 
     interrupted = next(m for m in messages if m.tool_call_id == "c_batch_2")
     assert "aborted" in interrupted.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_repeating_alternating_pattern_detected_as_loop() -> None:
+    """AUDIT-15: Repeating cycle of non-consecutive tool calls terminates run before max_steps."""
+    registry = ToolRegistry()
+
+    @tool(registry=registry)
+    def calc(n: int) -> int:
+        """Calculate."""
+        return n * 10
+
+    # Pattern: calc(1), calc(2), calc(1), calc(2), calc(1), calc(2)
+    responses = [
+        LLMResponse(tool_calls=[ToolCall(id="c1", name="calc", arguments={"n": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c2", name="calc", arguments={"n": 2})]),
+        LLMResponse(tool_calls=[ToolCall(id="c3", name="calc", arguments={"n": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c4", name="calc", arguments={"n": 2})]),
+        LLMResponse(tool_calls=[ToolCall(id="c5", name="calc", arguments={"n": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c6", name="calc", arguments={"n": 2})]),
+    ]
+    llm = FakeLLMClient(responses=responses)
+
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        config=AgentConfig(
+            max_steps=20,
+            max_consecutive_duplicate_tool_calls=3,
+        ),
+    )
+
+    result = await agent.run(goal="Alternating loop test")
+
+    assert result.status == RunStatus.FAILED
+    assert result.steps_count == 6
+    assert "repeating cycle of 2 tool calls" in (result.failure_reason or "")
+    assert "repeated 3 times" in (result.failure_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_repeating_alternating_pattern_raises_when_requested() -> None:
+    """AUDIT-15: Repeating cycle raises DuplicateToolCallLoopError when raise_on_failure=True."""
+    registry = ToolRegistry()
+
+    @tool(registry=registry)
+    def step_fn(x: int) -> int:
+        return x
+
+    responses = [
+        LLMResponse(tool_calls=[ToolCall(id="c1", name="step_fn", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c2", name="step_fn", arguments={"x": 2})]),
+        LLMResponse(tool_calls=[ToolCall(id="c3", name="step_fn", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c4", name="step_fn", arguments={"x": 2})]),
+    ]
+    llm = FakeLLMClient(responses=responses)
+
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        config=AgentConfig(
+            max_steps=10,
+            max_duplicate_tool_call_cycles=2,
+        ),
+    )
+
+    with pytest.raises(DuplicateToolCallLoopError) as exc_info:
+        await agent.run(goal="Test raise on cycle", raise_on_failure=True)
+
+    assert exc_info.value.tool_name == "step_fn"
+    assert exc_info.value.count == 2
+    assert exc_info.value.cycle_length == 2
+
+
+@pytest.mark.asyncio
+async def test_multi_tool_cycle_detected() -> None:
+    """AUDIT-15: Repeating cycle of 3 distinct tools is detected and halted."""
+    registry = ToolRegistry()
+
+    @tool(registry=registry)
+    def tool_alpha(x: int) -> int:
+        return x
+
+    @tool(registry=registry)
+    def tool_beta(x: int) -> int:
+        return x
+
+    @tool(registry=registry)
+    def tool_gamma(x: int) -> int:
+        return x
+
+    # 2 repetitions of cycle (alpha -> beta -> gamma)
+    responses = [
+        LLMResponse(tool_calls=[ToolCall(id="c1", name="tool_alpha", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c2", name="tool_beta", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c3", name="tool_gamma", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c4", name="tool_alpha", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c5", name="tool_beta", arguments={"x": 1})]),
+        LLMResponse(tool_calls=[ToolCall(id="c6", name="tool_gamma", arguments={"x": 1})]),
+    ]
+    llm = FakeLLMClient(responses=responses)
+
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        config=AgentConfig(
+            max_steps=10,
+            max_duplicate_tool_call_cycles=2,
+            max_tool_cycle_length=5,
+        ),
+    )
+
+    result = await agent.run(goal="3-cycle test")
+    assert result.status == RunStatus.FAILED
+    assert result.steps_count == 6
+    assert "repeating cycle of 3 tool calls" in (result.failure_reason or "")
+    assert "tool_alpha -> tool_beta -> tool_gamma" in (result.failure_reason or "")
