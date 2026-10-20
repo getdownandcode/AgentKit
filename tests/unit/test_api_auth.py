@@ -28,6 +28,25 @@ async def test_verify_api_key_direct() -> None:
     with pytest.raises(AuthenticationError):
         await verify_api_key(api_key="wrong_key", settings=settings)
 
+    # Whitespace-padded valid key normalises and succeeds identically to unpadded
+    assert await verify_api_key(api_key="  valid_key_1  ", settings=settings) == "valid_key_1"
+    assert await verify_api_key(api_key="\tvalid_key_2\n", settings=settings) == "valid_key_2"
+
+    # Whitespace-only key raises AuthenticationError
+    with pytest.raises(AuthenticationError):
+        await verify_api_key(api_key="   ", settings=settings)
+
+    # Non-ASCII / unicode invalid key raises AuthenticationError without crashing
+    with pytest.raises(AuthenticationError):
+        await verify_api_key(api_key="invalid_utf8_🔑", settings=settings)
+
+    # Unicode key matching succeeds when configured
+    unicode_settings = Settings(API_KEYS="unicode_key_🔑")
+    assert (
+        await verify_api_key(api_key="  unicode_key_🔑  ", settings=unicode_settings)
+        == "unicode_key_🔑"
+    )
+
 
 def test_api_key_auth_endpoint_integration() -> None:
     settings = Settings(API_KEYS="secret_token_123")
@@ -66,3 +85,8 @@ def test_api_key_auth_endpoint_integration() -> None:
     resp_valid = client.get("/protected", headers={"X-API-Key": "secret_token_123"})
     assert resp_valid.status_code == 200
     assert resp_valid.json() == {"status": "authorized"}
+
+    # Protected route with whitespace-padded valid header -> 200 (identical behavior)
+    resp_padded = client.get("/protected", headers={"X-API-Key": "  secret_token_123  "})
+    assert resp_padded.status_code == 200
+    assert resp_padded.json() == {"status": "authorized"}
