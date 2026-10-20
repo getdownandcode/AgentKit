@@ -207,3 +207,92 @@ def test_gemini_default_model(mock_genai_client: MagicMock) -> None:
     """Verify GeminiClient defaults to gemini-3.1-flash-lite."""
     adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
     assert adapter.model == "gemini-3.1-flash-lite"
+
+
+@pytest.mark.asyncio
+async def test_gemini_parallel_function_calls_grouped_and_preserve_ids(
+    mock_genai_client: MagicMock,
+) -> None:
+    """AUDIT-05: Parallel tool calls must preserve FunctionCall.id and group responses into one Content."""
+    # 1. Test extraction: FunctionCall.id is preserved
+    fc1 = MagicMock()
+    fc1.id = "call_calc_1"
+    fc1.name = "calculator"
+    fc1.args = {"expression": "2 + 2"}
+
+    fc2 = MagicMock()
+    fc2.id = "call_calc_2"
+    fc2.name = "calculator"
+    fc2.args = {"expression": "10 * 10"}
+
+    mock_part1 = MagicMock()
+    mock_part1.text = None
+    mock_part1.thought = False
+    mock_part1.function_call = fc1
+    mock_part1.thought_signature = None
+
+    mock_part2 = MagicMock()
+    mock_part2.text = None
+    mock_part2.thought = False
+    mock_part2.function_call = fc2
+    mock_part2.thought_signature = None
+
+    mock_candidate = MagicMock()
+    mock_candidate.content.parts = [mock_part1, mock_part2]
+
+    mock_response = MagicMock()
+    mock_response.candidates = [mock_candidate]
+    mock_response.text = ""
+    mock_response.usage_metadata.prompt_token_count = 10
+    mock_response.usage_metadata.candidates_token_count = 20
+
+    mock_genai_client.aio.models.generate_content.return_value = mock_response
+
+    adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
+    res = await adapter.chat([Message.user("Do two math problems")])
+
+    assert len(res.tool_calls) == 2
+    assert res.tool_calls[0].id == "call_calc_1"
+    assert res.tool_calls[0].name == "calculator"
+    assert res.tool_calls[1].id == "call_calc_2"
+    assert res.tool_calls[1].name == "calculator"
+
+    # 2. Test outbound conversion: tool responses must be grouped into ONE user Content
+    messages = [
+        Message.user("Do two math problems"),
+        Message.assistant(content="", tool_calls=res.tool_calls),
+        Message(role=Role.TOOL, content="4", tool_call_id="call_calc_1"),
+        Message(role=Role.TOOL, content="100", tool_call_id="call_calc_2"),
+    ]
+
+    mock_response2 = MagicMock()
+    mock_response2.candidates = []
+    mock_response2.text = "Results are 4 and 100"
+    mock_genai_client.aio.models.generate_content.return_value = mock_response2
+
+    await adapter.chat(messages)
+
+    call_kwargs = mock_genai_client.aio.models.generate_content.call_args.kwargs
+    contents = call_kwargs["contents"]
+
+    # Should have 3 contents: [user, model, user(with 2 tool response parts)]
+    assert len(contents) == 3
+    assert contents[0].role == "user"
+    assert contents[1].role == "model"
+    assert len(contents[1].parts) == 2  # 2 function calls
+
+    tool_content = contents[2]
+    assert tool_content.role == "user"
+    # Exactly as many function_response parts as the assistant turn had function_call parts
+    assert len(tool_content.parts) == 2
+
+    # Verify responses are emitted in call order with matching ids
+    part_resp1 = tool_content.parts[0]
+    assert part_resp1.function_response.name == "calculator"
+    assert part_resp1.function_response.id == "call_calc_1"
+    assert part_resp1.function_response.response == {"result": "4"}
+
+    part_resp2 = tool_content.parts[1]
+    assert part_resp2.function_response.name == "calculator"
+    assert part_resp2.function_response.id == "call_calc_2"
+    assert part_resp2.function_response.response == {"result": "100"}

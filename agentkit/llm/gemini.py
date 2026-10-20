@@ -105,17 +105,27 @@ class GeminiClient(LLMClient):
                 tool_name = (
                     tool_id_to_name.get(msg.tool_call_id or "") or msg.tool_call_id or "tool"
                 )
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_function_response(
-                                name=tool_name,
-                                response={"result": msg.content},
-                            )
-                        ],
-                    )
+                tool_part = types.Part.from_function_response(
+                    name=tool_name,
+                    response={"result": msg.content},
                 )
+                if msg.tool_call_id and tool_part.function_response is not None:
+                    tool_part.function_response.id = msg.tool_call_id
+
+                prev_parts = (
+                    contents[-1].parts if contents and contents[-1].role == "user" else None
+                )
+                if prev_parts is not None and any(
+                    getattr(p, "function_response", None) for p in prev_parts
+                ):
+                    prev_parts.append(tool_part)
+                else:
+                    contents.append(
+                        types.Content(
+                            role="user",
+                            parts=[tool_part],
+                        )
+                    )
 
         # Convert tools to Gemini FunctionDeclarations
         config_tools: list[Any] | None = None
@@ -171,12 +181,15 @@ class GeminiClient(LLMClient):
                             fc = part.function_call
                             raw_sig = getattr(part, "thought_signature", None)
                             sig = raw_sig if isinstance(raw_sig, bytes) else None
+                            fc_id = getattr(fc, "id", None)
+                            call_id = (
+                                fc_id if isinstance(fc_id, str) and fc_id else str(uuid.uuid4())
+                            )
                             tool_calls.append(
                                 ToolCall(
-                                    # Full UUID: tool_call_id is the join key between an
-                                    # assistant tool call and its tool result, so a truncated
-                                    # 32-bit id risks collisions within a long session.
-                                    id=str(uuid.uuid4()),
+                                    # Preserve the provider's FunctionCall.id when present;
+                                    # fall back to a full UUID so tool_call_id remains unique.
+                                    id=call_id,
                                     name=fc.name,
                                     arguments=dict(fc.args or {}),
                                     thought_signature=sig,
