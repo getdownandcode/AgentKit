@@ -1,5 +1,6 @@
 """API key authentication dependency validating X-API-Key header."""
 
+import hmac
 import logging
 
 from fastapi import Depends, Request, Security
@@ -23,8 +24,28 @@ async def verify_api_key(
     api_key: str | None = Security(api_key_header),
     settings: Settings = Depends(get_current_settings),
 ) -> str:
-    """Validate client API key from X-API-Key header against configured authorized keys."""
-    if not api_key or api_key not in settings.api_keys_list:
+    """Validate client API key from X-API-Key header against configured authorized keys.
+
+    Normalises the presented key (stripping whitespace) and uses constant-time comparison
+    (`hmac.compare_digest`) across all configured keys to eliminate timing oracles.
+    """
+    if not api_key:
         logger.warning("Unauthorized API request with missing or invalid key.")
         raise AuthenticationError("Invalid or missing API key.")
-    return api_key
+
+    normalized_key = api_key.strip()
+    if not normalized_key:
+        logger.warning("Unauthorized API request with missing or invalid key.")
+        raise AuthenticationError("Invalid or missing API key.")
+
+    presented_bytes = normalized_key.encode("utf-8")
+    matched = False
+    for valid_key in settings.api_keys_list:
+        if hmac.compare_digest(presented_bytes, valid_key.encode("utf-8")):
+            matched = True
+
+    if not matched:
+        logger.warning("Unauthorized API request with missing or invalid key.")
+        raise AuthenticationError("Invalid or missing API key.")
+
+    return normalized_key
