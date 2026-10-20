@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentkit.api.deps import get_llm_client
+from agentkit.api.deps import get_llm_client, get_memory_store, get_trace_sink
 from agentkit.api.main import create_app
 from agentkit.api.ratelimit import RateLimiter
 from agentkit.config import Settings
@@ -467,6 +467,82 @@ async def test_gemini_malformed_response_raises_provider_error() -> None:
 
     with pytest.raises(_ProviderError, match="Malformed Gemini response"):
         await client.chat(messages=[])
+
+
+async def test_gemini_thought_parts_excluded_from_response_and_api_answer() -> None:
+    """AUDIT-06: Parts with thought=True must not leak into response.text or API answer."""
+    from agentkit.llm.gemini import GeminiClient
+
+    thought_part = SimpleNamespace(
+        text="INTERNAL CHAIN OF THOUGHT: step 1, step 2",
+        thought=True,
+        function_call=None,
+        thought_signature=None,
+    )
+    answer_part = SimpleNamespace(
+        text="42 is the answer",
+        thought=False,
+        function_call=None,
+        thought_signature=None,
+    )
+    candidate = SimpleNamespace(content=SimpleNamespace(parts=[thought_part, answer_part]))
+    raw = SimpleNamespace(candidates=[candidate], usage_metadata=None, text="42 is the answer")
+
+    sdk_client = AsyncMock()
+    sdk_client.aio.models.generate_content = AsyncMock(return_value=raw)
+
+    gemini_client = GeminiClient(api_key="key", client=sdk_client)
+    response = await gemini_client.chat(messages=[])
+
+    assert response.text == "42 is the answer"
+    assert "INTERNAL CHAIN OF THOUGHT" not in response.text
+
+    # Test via API endpoint POST /runs
+    settings = Settings(API_KEYS="secret_token")
+    app = create_app(settings=settings)
+    app.dependency_overrides[get_memory_store] = lambda: InMemoryMemoryStore()
+    app.dependency_overrides[get_trace_sink] = lambda: InMemoryTraceSink()
+    app.dependency_overrides[get_llm_client] = lambda: gemini_client
+
+    test_client = TestClient(app, raise_server_exceptions=False)
+    headers = {"X-API-Key": "secret_token"}
+    resp = test_client.post("/runs", json={"goal": "What is the answer?"}, headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "succeeded"
+    assert data["answer"] == "42 is the answer"
+    assert "INTERNAL CHAIN OF THOUGHT" not in (data.get("answer") or "")
+
+
+async def test_gemini_thought_part_with_function_call_yields_tool_call() -> None:
+    """AUDIT-06: A thought part with a function_call still yields the tool call and signature."""
+    from agentkit.llm.gemini import GeminiClient
+
+    fc = SimpleNamespace(name="calculator", args={"expression": "2+2"})
+    part = SimpleNamespace(
+        text="Thinking about calling calculator...",
+        thought=True,
+        function_call=fc,
+        thought_signature=b"opaque_sig",
+    )
+    candidate = SimpleNamespace(content=SimpleNamespace(parts=[part]))
+    raw = SimpleNamespace(candidates=[candidate], usage_metadata=None, text="")
+
+    sdk_client = AsyncMock()
+    sdk_client.aio.models.generate_content = AsyncMock(return_value=raw)
+
+    client = GeminiClient(api_key="key", client=sdk_client)
+    response = await client.chat(messages=[])
+
+    # Text must exclude the thought part
+    assert response.text == ""
+    assert "Thinking about calling" not in response.text
+
+    # Tool call and thought_signature must be preserved
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "calculator"
+    assert response.tool_calls[0].arguments == {"expression": "2+2"}
+    assert response.tool_calls[0].thought_signature == b"opaque_sig"
 
 
 # --- sql_readonly: server-side row limit ---------------------------------------------------

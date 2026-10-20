@@ -165,7 +165,7 @@ class GeminiClient(LLMClient):
                 candidate = candidates[0]
                 if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
-                        if getattr(part, "text", None):
+                        if getattr(part, "text", None) and not getattr(part, "thought", False):
                             text_parts.append(part.text)
                         if getattr(part, "function_call", None):
                             fc = part.function_call
