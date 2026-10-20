@@ -70,6 +70,10 @@ def create_tool_schema(
     }
     if required:
         parameters["required"] = required
+    if "$defs" in raw_json_schema:
+        parameters["$defs"] = raw_json_schema["$defs"]
+    if "additionalProperties" in raw_json_schema:
+        parameters["additionalProperties"] = raw_json_schema["additionalProperties"]
 
     schema = ToolSchema(
         name=tool_name,
