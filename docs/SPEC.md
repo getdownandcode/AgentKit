@@ -222,7 +222,7 @@ Add an index on `steps(run_id, step_no)` and `runs(session_id)`. Manage schema c
 
 All configuration comes from environment variables, loaded through a Pydantic `BaseSettings` class. Provide a `.env.example` file. Never commit secrets.
 
-Required or supported variables include: `DATABASE_URL`, `REDIS_URL`, `LLM_PROVIDER`, `LLM_MODEL`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `SEARCH_API_KEY`, `API_KEYS` (comma-separated), `MAX_STEPS`, `RUN_TIMEOUT_S`, `TOOL_TIMEOUT_S`, `RATE_LIMIT_PER_MIN`, `FILE_TOOL_BASE_DIR`, `SESSION_TTL_S`, `TOOL_OUTPUT_MAX_CHARS`.
+Required or supported variables include: `DATABASE_URL`, `REDIS_URL`, `LLM_PROVIDER`, `LLM_MODEL`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `SEARCH_API_KEY`, `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_DELAY_S`, `LLM_RETRY_MAX_DELAY_S`, `FILE_TOOL_BASE_DIR`, `API_KEYS` (comma-separated), `RATE_LIMIT_PER_MIN`, `MAX_STEPS`, `RUN_TIMEOUT_S`, `TOOL_TIMEOUT_S`, `SESSION_TTL_S`, `TOOL_OUTPUT_MAX_CHARS`.
 
 ## 9. Repository layout
 

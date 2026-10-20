@@ -182,6 +182,7 @@ def get_agent(
         max_steps=settings.MAX_STEPS,
         run_timeout_s=settings.RUN_TIMEOUT_S,
         tool_timeout_s=settings.TOOL_TIMEOUT_S,
+        tool_output_max_chars=settings.TOOL_OUTPUT_MAX_CHARS,
     )
     return Agent(
         llm=llm,
