@@ -195,3 +195,19 @@ This log records significant architectural, technical, and design decisions made
   - Writing through the tool requires two independent failures, one of them a database privilege error; a validation gap alone is no longer enough.
   - Deployments must provision the role (`python scripts/init_readonly_role.py`) or the SQL tool returns a structured failure. Compose does this in the migrations service.
   - An injected engine (demo, tests) is explicitly caller-owned and still gets the read-only transaction, but not the superuser check.
+
+---
+
+## ADR-013: Session History Is Durable, Bounded and Read Fail-Closed
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: Session persistence had three independent failure modes. `RedisMemoryStore.save_messages` serialized with `model_dump(mode="json")`, and Pydantic's default `ser_json_bytes="utf8"` raises `UnicodeDecodeError` on any non-UTF-8 Gemini `thought_signature` — so one signature aborted the write of the *entire* conversation. `get_messages` turned any deserialization error into `[]`, which made a corrupt history indistinguishable from a new conversation and let the next run overwrite it with the truncated one. And `truncate_messages` was never wired to a setting (histories grew without bound), while the naive tail cut it implemented could start the history on a `tool` message whose assistant `tool_calls` turn had been dropped, a shape providers reject.
+- **Decision**:
+  - Binary signatures are persisted with an explicit tagged base64 object (`{"base64": "..."}`), encoded in the store and decoded by a `ToolCall` field validator. Bare strings are still decoded as the legacy raw UTF-8 form so old histories remain readable.
+  - A corrupt or unreadable history raises `SessionHistoryError` (503) instead of returning `[]`. `Agent.run` logs it with the session id, marks the run failed and never calls `save_messages`.
+  - `SESSION_MAX_MESSAGES` (default 40) bounds the retained history and is wired through `get_memory_store`. Truncation advances the cut point past leading tool results, so the kept history is always provider-valid.
+- **Consequences**:
+  - A conversation can no longer be silently replaced by a context-free one after a decode error or a Redis blip; the caller gets a 503 it can retry.
+  - Sessions are bounded in Redis, and the bound is enforced at the only writer.
+  - A stored history written by an older version stays readable, at the cost of an explicit legacy branch in the validator.

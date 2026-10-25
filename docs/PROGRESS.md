@@ -64,6 +64,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-01/02 | AUDIT | Read-Only SQL Isolation and Row Cap | `fix/sql-readonly-isolation` | stacked | 2 | Done | Dedicated non-superuser role, dollar-quote/E-string masking, built-in denylist, clamped server-side row cap |
 | AUDIT-18 | AUDIT | Compose Datastore Hardening | `chore/compose-hardening` | stacked | 1 | Done | Loopback-only datastore ports, required Postgres/Redis passwords, fail-closed credential guard |
 | AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | stacked | 2 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
+| AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | stacked | 2 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
 
 ---
 
@@ -428,3 +429,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `chore/compose-hardening`
 - **Commits**: 2
 - **Notes**: Persistence is no longer best-effort. `Agent.run` logs and raises the new `PersistenceError` (HTTP 503, code `PERSISTENCE_ERROR`) when `create_run` fails, so the loop never executes for a run nobody can read back; a failed final `update_run` is retried once with `status=failed` so a transient fault cannot leave the row stuck in `running`. `POST /runs` no longer synthesises a 200 from the in-memory result when the store cannot return the record — it raises `PersistenceError`, and `GET /runs/{id}` still returns 404 for a run that was never persisted. `PostgresTraceSink` no longer fabricates a placeholder `Run` (`goal="Agent Execution"`, `session_id=None`, `status="running"`); it logs an error and drops the step when the parent row is missing, leaving `create_run` as the only writer of run rows. `session_id` is bounded at the request boundary (`max_length=255`, shared with the `String(255)` column through `SESSION_ID_MAX_LENGTH`), so an over-long id is a 422 before any agent work instead of a swallowed insert error. Covered by `tests/integration/test_persistence_integrity.py`, `tests/unit/test_pg_trace.py` and updated live-PostgreSQL tests in `tests/real/test_postgres_real.py`.
+
+### AUDIT-04 / AUDIT-10 / AUDIT-11: Session History Durability
+- **Status**: Done
+- **PR**: stacked on `fix/persistence-integrity`
+- **Commits**: 2
+- **Notes**: Gemini `thought_signature` is persisted as an explicitly tagged base64 object (`{"base64": "..."}`) and decoded by a `ToolCall` field validator, so arbitrary binary round-trips byte-for-byte instead of raising `UnicodeDecodeError` inside `model_dump(mode="json")` and aborting the whole save; legacy UTF-8-encoded signatures remain readable. A corrupt or unreadable history now raises the new `SessionHistoryError` (503) with an ERROR log carrying the session id, instead of being read as an empty conversation that the next run overwrote — the agent also marks the run failed rather than leaving it `running`. `SESSION_MAX_MESSAGES` (default 40) is wired through `get_memory_store`, documents in `.env.example`/`docs/SPEC.md`, and `RedisMemoryStore.truncate_messages` advances its cut point past leading tool results so the kept history is always provider-valid. Covered by `tests/unit/test_session_history.py` (binary round trips, tagged encoding, legacy read, corrupt payload, agent fail-closed behaviour, every truncation cut point, storage bound, settings wiring).

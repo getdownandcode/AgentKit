@@ -88,7 +88,11 @@ def get_memory_store(request: Request) -> PostgresMemoryStore | MemoryStore:
     )
 
     run_store = PostgresMemoryStore(factory)
-    session_store = RedisMemoryStore(redis_client, ttl_s=settings.SESSION_TTL_S)
+    session_store = RedisMemoryStore(
+        redis_client,
+        ttl_s=settings.SESSION_TTL_S,
+        max_messages=settings.SESSION_MAX_MESSAGES,
+    )
     return TieredMemoryStore(session_store=session_store, run_store=run_store)
 
 

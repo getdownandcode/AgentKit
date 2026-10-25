@@ -1,8 +1,13 @@
 """Neutral domain models for tools, tool execution results, and tool schemas."""
 
+import base64
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+
+#: Key used by the persisted form of a binary thought signature. The wrapper makes the
+#: encoding unambiguous: a bare string could be base64 or the raw bytes decoded as UTF-8.
+THOUGHT_SIGNATURE_BASE64_KEY = "base64"
 
 
 class ToolResult(BaseModel):
@@ -71,6 +76,39 @@ class ToolCall(BaseModel):
         default=None,
         description="Optional provider thought signature for preserving tool call state across turns.",
     )
+
+    @field_validator("thought_signature", mode="before")
+    @classmethod
+    def decode_thought_signature(cls, value: Any) -> bytes | None:
+        """Decode a persisted signature back into bytes.
+
+        Gemini signatures are arbitrary binary, so Pydantic's default UTF-8 handling of
+        ``bytes`` cannot round-trip them. Persisted values are therefore an explicitly tagged
+        base64 object. A bare string is accepted for histories written before that encoding
+        existed: the raw bytes were stored as their UTF-8 decoding, which is recovered here.
+
+        Args:
+            value: Bytes, a ``{"base64": ...}`` object, a legacy string, or None.
+
+        Returns:
+            The signature bytes, or None.
+
+        Raises:
+            ValueError: If a tagged object does not carry a base64 string payload.
+        """
+        if value is None or isinstance(value, bytes):
+            return value
+        if isinstance(value, dict):
+            encoded = value.get(THOUGHT_SIGNATURE_BASE64_KEY)
+            if not isinstance(encoded, str):
+                raise ValueError(
+                    "thought_signature must be a base64 object "
+                    f'{{"{THOUGHT_SIGNATURE_BASE64_KEY}": "..."}}'
+                )
+            return base64.b64decode(encoded.encode("ascii"), validate=True)
+        if isinstance(value, str):
+            return value.encode("utf-8")
+        raise ValueError(f"Unsupported thought_signature value of type {type(value).__name__}")
 
 
 class ToolSchema(BaseModel):

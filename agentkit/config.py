@@ -110,6 +110,14 @@ class Settings(BaseSettings):
         gt=0,
         description="TTL in seconds for Redis conversation session cache.",
     )
+    SESSION_MAX_MESSAGES: int = Field(
+        default=40,
+        gt=0,
+        description=(
+            "Maximum messages retained per session history (system prompt included). "
+            "Truncation never leaves a tool result without its tool call."
+        ),
+    )
     TOOL_OUTPUT_MAX_CHARS: int = Field(
         default=2000,
         gt=0,

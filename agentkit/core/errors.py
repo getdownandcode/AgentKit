@@ -178,6 +178,19 @@ class PersistenceError(ServiceUnavailableError):
         self.run_id = run_id
 
 
+class SessionHistoryError(PersistenceError):
+    """Raised when a session's stored conversation history cannot be read.
+
+    A run must not continue on a silently empty history: it would answer without the prior
+    context and then overwrite the stored conversation with the shortened one.
+    """
+
+    def __init__(self, message: str, session_id: str | None = None) -> None:
+        super().__init__(message)
+        self.code = "SESSION_HISTORY_ERROR"
+        self.session_id = session_id
+
+
 # Aliases for convenience
 ToolNotFoundError = ToolNotFound
 LLMRateLimitError = RateLimitExceededError

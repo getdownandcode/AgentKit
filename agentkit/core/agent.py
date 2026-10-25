@@ -13,6 +13,7 @@ from agentkit.core.errors import (
     MaxStepsExceeded,
     PersistenceError,
     RunTimeoutError,
+    SessionHistoryError,
 )
 from agentkit.core.log import log_context, set_current_step_no
 from agentkit.core.trace import StepTrace, TraceSink
@@ -148,6 +149,8 @@ class Agent:
             PersistenceError: If the run row cannot be created before execution, or its final
                 state cannot be written afterwards. Execution never continues without a run
                 record, so a caller can always read back what it was told happened.
+            SessionHistoryError: If the session's stored history cannot be read. The run stops
+                rather than replacing that history with a context-free conversation.
         """
         start_time = time.perf_counter()
         run_id = str(uuid.uuid4())
@@ -243,10 +246,33 @@ class Agent:
 
             messages: list[Message] = []
             if session_id and self.memory is not None and hasattr(self.memory, "get_messages"):
-                with contextlib.suppress(Exception):
+                try:
                     loaded = await self.memory.get_messages(session_id)
-                    if loaded:
-                        messages = list(loaded)
+                except Exception as exc:
+                    # Continuing here would answer with no context and then overwrite the real
+                    # history with the shorter one: silent, permanent conversation loss.
+                    logger.error(
+                        "Could not load session history (run_id=%s, session_id=%s): %s",
+                        run_id,
+                        session_id,
+                        exc,
+                    )
+                    # The run row already exists; leave it marked failed rather than running.
+                    if self.memory is not None and hasattr(self.memory, "update_run"):
+                        with contextlib.suppress(Exception):
+                            await self.memory.update_run(
+                                run_id=run_id,
+                                status=RunStatus.FAILED,
+                                failure_reason=("Session history could not be loaded."),
+                            )
+                    if isinstance(exc, SessionHistoryError):
+                        raise
+                    raise SessionHistoryError(
+                        f"Session history for {session_id!r} could not be loaded.",
+                        session_id=session_id,
+                    ) from exc
+                if loaded:
+                    messages = list(loaded)
 
             if not messages:
                 messages = [
