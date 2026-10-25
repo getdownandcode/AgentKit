@@ -27,10 +27,10 @@ Per the AgentKit specification and development rules:
 
 | Component | Audit Check | Verdict | Notes |
 |:---|:---|:---:|:---|
-| **Gemini Adapter** (`agentkit/llm/gemini.py`) | Real SDK calls, token extraction, thought signature preservation | **PASS** | Uses official `google-genai` SDK `client.aio.models.generate_content`, extracts `usage_metadata` token counts, handles structured tool declarations. |
+| **Gemini Adapter** (`agentkit/llm/gemini.py`) | Real SDK calls, token extraction, thought signature preservation | **PASS (after AUDIT-04/05/06)** | Uses official `google-genai` SDK `client.aio.models.generate_content`, extracts `usage_metadata` token counts, handles structured tool declarations. Earlier revisions of this table recorded an unqualified PASS while signatures could not be persisted, parallel function calls were rejected and thought parts leaked into the answer; those are fixed in the AUDIT remediation table below. |
 | **OpenAI Adapter** (`agentkit/llm/openai.py`) | Real SDK calls, token extraction, tool calls | **PASS** | Uses official `openai` SDK `client.chat.completions.create`, extracts prompt/completion tokens, parses tool call JSON arguments. |
 | **AST Calculator** (`agentkit/tools/builtin/calculator.py`) | No `eval`/`exec`, operator whitelist, DoS guards | **PASS** | Pure Python `ast` parser with strict node/exponent limits. |
-| **Read-Only SQL Tool** (`agentkit/tools/builtin/sql_readonly.py`) | Single SELECT/WITH validation, DDL/DML rejection, real DB execution | **PASS** | AST/regex validation blocking DDL/DML, executes against SQLAlchemy engine, returns markdown. |
+| **Read-Only SQL Tool** (`agentkit/tools/builtin/sql_readonly.py`) | Single SELECT/WITH validation, DDL/DML rejection, real DB execution | **PASS (after AUDIT-01/02)** | No SQL parser is used: validation is a statement lexer (single `SELECT`/`WITH`, comment and separator scans on literal-masked text, function denylist for file/system built-ins). The primary control is the dedicated non-superuser role with `default_transaction_read_only` and `SELECT`-only grants; a superuser connection or missing `DATABASE_READONLY_URL` fails closed. The row cap is enforced in SQL, clamping `LIMIT ALL` and oversized limits. |
 | **Sandboxed File Reader** (`agentkit/tools/builtin/read_file.py`) | Canonical path containment, symlink escape checks | **PASS** | Resolves real canonical paths, blocks traversal (`../`) and escaping symlinks. |
 | **HTTP Fetch Tool** (`agentkit/tools/builtin/http_fetch.py`) | SSRF defense, RFC 1918 blocking, redirect safety | **PASS** | Validates DNS IPs on every hop, blocks loopback/private/metadata subnets, real `httpx` streaming. |
 | **Web Search Tool** (`agentkit/tools/builtin/web_search.py`) | Real network calls to Tavily API | **PASS** | Makes real `httpx` POST calls, parses results or surfaces informative missing key errors. |
@@ -60,3 +60,32 @@ Per the AgentKit specification and development rules:
    - Start live Docker Compose stack (`docker compose up -d`).
    - Run end-to-end demo and security/edge-case tests against live services.
    - Generate `docs/E2E_REPORT.md` with verbatim live output.
+
+---
+
+## 4. Consolidated AUDIT-01…18 Remediation (2026-10-25)
+
+A second whole-codebase audit filed 18 standalone findings as GitHub issues (`AUDIT-01` …
+`AUDIT-18`). They were fixed as a linear stack of nine branches; this table is the index, and
+`docs/PROGRESS.md` records the per-layer detail.
+
+| Finding | Severity | Issue | Branch | Resolution |
+|:---|:---:|:---:|:---|:---|
+| AUDIT-01 SQL tool runs as the app superuser | Critical | #58 | `fix/sql-readonly-isolation` | Dedicated non-superuser role, session read-only, superuser refused, quoting-mask and built-in denylist hardening |
+| AUDIT-02 `LIMIT ALL` bypasses the row cap | Critical | #59 | `fix/sql-readonly-isolation` | Trailing bounds clamped in SQL (`ALL`/`NULL`/oversized), subquery bounds left alone |
+| AUDIT-03 Trace sink fabricates a placeholder run | High | #60 | `fix/persistence-integrity` | Sink drops the step and logs; `create_run` is the only writer of run rows |
+| AUDIT-04 `thought_signature` cannot be persisted | High | #61 | `fix/session-history` | Explicit tagged base64 codec plus `ToolCall` validator |
+| AUDIT-05 Gemini parallel function calls broken | High | #62 | `fix/gemini-adapter` | One `Content` per call turn with one response part per call, provider ids preserved |
+| AUDIT-06 Gemini thought parts leak into the answer | High/Medium | #63 | `fix/gemini-adapter` | `thought=True` parts excluded, guarded `raw_response.text` fallback |
+| AUDIT-07 Refusals/blocks/empty responses succeed | Medium-High | #64 | `fix/provider-refusal-status` | `LLMResponse.refusal_reason`, `RunStatus.REFUSED`, explicit empty-response failure |
+| AUDIT-08 Persistence errors swallowed | Medium-High | #65 | `fix/persistence-integrity` | `PersistenceError` (503), failed-state retry, no synthesised 200 |
+| AUDIT-09 `session_id` unbounded | Medium-High | #66 | `fix/persistence-integrity` | `max_length=255` shared with the column via `SESSION_ID_MAX_LENGTH` |
+| AUDIT-10 Session-history load failure is destructive | Medium-High | #67 | `fix/session-history` | `SessionHistoryError` (503), run marked failed, history never overwritten |
+| AUDIT-11 Truncation unwired and orphans tool messages | Medium | #68 | `fix/session-history` | `SESSION_MAX_MESSAGES` wired, cut point advanced past leading tool results |
+| AUDIT-12 `TOOL_OUTPUT_MAX_CHARS` ignored | Medium | #69 | `fix/tools-resources-config` | Wired into `AgentConfig`; compose forwards every documented setting |
+| AUDIT-13 Tool schemas drop `$defs` | Medium | #70 | `fix/tools-resources-config` | `$defs` and related keys preserved, `$ref`s resolve |
+| AUDIT-14 Provider clients per request, never closed | Medium | #71 | `fix/tools-resources-config` | One app-owned client, closed on shutdown |
+| AUDIT-15 Duplicate detector only catches consecutive repeats | Medium | #72 | `fix/agent-loop-and-auth` | Sliding window of recent signatures |
+| AUDIT-16 Documentation asserts guarantees the code lacks | Medium | #73 | `docs/correct-audit-claims` | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected, ADRs 012–017 added |
+| AUDIT-17 API key comparison not constant-time | Low | #74 | `fix/agent-loop-and-auth` | `hmac.compare_digest` over normalised keys, no short-circuit |
+| AUDIT-18 Compose publishes datastores with weak credentials | Low/Deployment | #75 | `chore/compose-hardening` | Loopback binds, required passwords, Redis auth, fail-closed credential guard |

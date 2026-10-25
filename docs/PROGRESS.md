@@ -51,7 +51,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M13-T01 | M13       | Real-Infrastructure Test Tier | `fix/real-infrastructure-verification` | #44 | 1 | Done | Opt-in live test tier against real PostgreSQL and Redis |
 | M13-T02 | M13       | Atomic Sliding-Window Rate Limiting | `fix/real-infrastructure-verification` | #44 | 1 | Done | Atomic Lua script eliminating 19/20 concurrency bypass |
 | M13-T03 | M13       | CI Split, Compose Hardening | `fix/real-infrastructure-verification` | #44 | 1 | Done | CI live service job, strict compose API_KEYS, demo persistence |
-| M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, tool role, gemini-2.0-flash default |
+| M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, function-response role; default model `gemini-3.1-flash-lite` (corrected from an earlier `gemini-2.0-flash` claim) |
 | M13-T05 | M13       | Idempotent Demo Seeding & Compose Auto-Seed | `feat/docker-compose-seed` | #46 | 2 | Done | ON CONFLICT DO NOTHING, scripts/seed.py, compose boot auto-seed |
 | AUD-01  | AUD       | Strict Infrastructure Resolution in API Dependencies | `fix/api-deps-strict-infrastructure` | #48 | 2 | Done | Eliminate silent in-memory and fake LLM fallbacks from deps.py |
 | AUD-04  | AUD       | Wire RetryingLLMClient into LLM Factory | `fix/wire-llm-retry-wrapper` | #49 | 2 | Done | Added MAX_RETRIES setting and wrapped live LLM providers with retry |
@@ -69,6 +69,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | stacked | 2 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
 | AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | stacked | 2 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
 | AUDIT-15/17 | AUDIT | Loop Detection and API Key Auth | `fix/agent-loop-and-auth` | stacked | 2 | Done | Sliding-window duplicate detector; hmac.compare_digest with normalised keys |
+| AUDIT-16 | AUDIT | Documentation Claim Corrections | `docs/correct-audit-claims` | stacked | 1 | Done | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected and guarded by tests |
 
 ---
 
@@ -359,7 +360,7 @@ This document tracks execution progress across all backlog tasks, including pull
 - **Status**: Done
 - **PR**: #45
 - **Commits**: 2
-- **Notes**: Resolved Gemini 2.x/3.x tool-calling incompatibility. Added `thought_signature: bytes | None = None` to neutral `ToolCall` model; captured candidate `thought_signature` from Gemini responses and forwarded it on subsequent conversation turns via `types.Part(function_call=..., thought_signature=...)`; resolved `Role.TOOL` function response names using assistant tool call history with `role="tool"`; standardized active default model to `gemini-2.0-flash` across application config, factory, `.env.example`, and `docker-compose.yml`; ensured `RedisMemoryStore` serializes messages with `mode="json"` for safe base64 bytes encoding.
+- **Notes**: Resolved Gemini 2.x/3.x tool-calling incompatibility. Added `thought_signature: bytes | None = None` to neutral `ToolCall` model; captured candidate `thought_signature` from Gemini responses and forwarded it on subsequent conversation turns via `types.Part(function_call=..., thought_signature=...)`; resolved function-response names using assistant tool call history (the response role was later corrected to `user` by ADR-008); standardized the active default model across application config, factory, `.env.example`, and `docker-compose.yml`. **Corrections (AUDIT-16):** this entry originally named `gemini-2.0-flash` — the active default is `gemini-3.1-flash-lite` — and claimed `mode="json"` gave "safe base64 bytes encoding", which was false: it raises on non-UTF-8 bytes and broke the whole save. Signature persistence is now an explicit tagged base64 codec (ADR-013).
 
 ### M13-T05: Idempotent Demo Seeding & Docker Compose Auto-Seeding
 - **Status**: Done
@@ -463,3 +464,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/tools-resources-config`
 - **Commits**: 2
 - **Notes**: The duplicate-tool detector now counts `(tool, canonical-args)` occurrences inside a configurable sliding window (`duplicate_tool_call_window`, default 20) instead of remembering only the previous call, so alternating patterns such as `calculator(1)`, `calculator(2)`, `calculator(1)`, … abort the run in a few steps rather than at `max_steps`; the repeat threshold keeps its original field name and existing consecutive-repeat behaviour. API key verification strips the presented key the same way configured keys are and compares every configured key with `hmac.compare_digest` without short-circuiting, returning the normalised key used for rate limiting and logging. Covered by `tests/unit/test_loop_detector_and_auth.py`, and `tests/unit/test_agent_loop_detector.py` was updated where it encoded the old consecutive-only expectation. Recorded in ADR-017.
+
+### AUDIT-16: Documentation Claim Corrections
+- **Status**: Done
+- **PR**: stacked on `fix/agent-loop-and-auth`
+- **Commits**: 1
+- **Notes**: Corrected the claims the code did not support. `README.md` no longer describes `sql_readonly` as AST-validated and instead states the dedicated-role control and the lexer's actual limits. `docs/ARCHITECTURE.md` gained the real default model (`gemini-3.1-flash-lite`) and one-client-per-application note; its read-only SQL guardrail already describes the implemented role, session and row-cap controls. `docs/AUDIT.md` downgrades the SQL and Gemini component rows from an unqualified PASS to "PASS (after AUDIT-01/02)" / "PASS (after AUDIT-04/05/06)" and gains a remediation table indexed by issue number for all 18 findings. ADR-006 is annotated "superseded in part by ADR-008 and ADR-013" with inline corrections for the false base64 claim and the stale `gemini-2.0-flash` model id; the matching PROGRESS table row, its notes and `docs/PLAN.md` are aligned. `tests/unit/test_docs_accuracy.py` guards the default model name, the SQL wording, the ADR-006 annotation, the PASS qualifiers and the presence of all 18 findings in the remediation table.

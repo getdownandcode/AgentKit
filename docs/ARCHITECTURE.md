@@ -56,6 +56,7 @@ AgentKit follows clean architecture principles:
    - Houses built-in sandboxed tools (`calculator`, `sql_readonly`, `read_file`, `http_fetch`, `web_search`).
 4. **LLM Adapter Layer (`agentkit/llm`)**:
    - Converts internal domain message types (`Message`, `ToolCall`, `LLMResponse`) to/from provider-specific SDK formats (Google Gemini, OpenAI).
+   - The default model is `gemini-3.1-flash-lite` (`Settings.LLM_MODEL`); one provider client is built per application and closed on shutdown.
    - Handles exponential backoff retries with jitter for transient provider failures.
 5. **Memory & Persistence Layer (`agentkit/memory`, `agentkit/db`)**:
    - Redis store: Ephemeral conversation history per `session_id` with TTL, plus rate limiting counters.

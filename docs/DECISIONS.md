@@ -78,14 +78,14 @@ This log records significant architectural, technical, and design decisions made
 ## ADR-006: Gemini 2.x/3.x Thought Signature Preservation and Active Model Standard
 
 - **Date**: 2026-10-01
-- **Status**: Accepted
+- **Status**: Accepted; superseded in part by ADR-008 (function-response role) and ADR-013 (signature encoding). Two claims below were inaccurate when written and are corrected inline — see the notes on the serialization and model bullets.
 - **Context**: Newer Gemini reasoning models (e.g. Gemini 2.x and 3.x) employ internal reasoning/thinking steps before invoking tools. The Google GenAI API emits an opaque `thought_signature` on candidate `Part` objects containing `function_call`. When returning subsequent conversation turns with `function_response` parts, the API strictly enforces that the prior assistant turn echoes back the exact `thought_signature`. Omitting this signature produces `400 INVALID_ARGUMENT — Function call is missing a thought_signature in functionCall parts`. Additionally, older model identifiers like `gemini-2.5-flash` returned `404 NOT_FOUND` for new users, and `Role.TOOL` messages in the Gemini adapter previously used `role="user"` instead of the official `role="tool"` and mapped tool calls by arbitrary UUID IDs rather than declared function names.
 - **Decision**:
   - Update `ToolCall` neutral model to include an optional `thought_signature: bytes | None = None` field.
   - In `GeminiClient`, extract and preserve `thought_signature` from candidate parts and forward it in subsequent assistant tool calls using `types.Part(function_call=..., thought_signature=...)`.
   - In `GeminiClient`, resolve `Role.TOOL` message identifiers to declared function names via assistant history, and use `types.Content(role="tool", parts=[...])` adhering to official Google GenAI SDK standards.
-  - Update `RedisMemoryStore` to serialize messages via `m.model_dump(mode="json")` so raw bytes fields are transparently base64-encoded and decoded across session persistence.
-  - Standardize the active default Gemini model to `gemini-2.0-flash` across application settings, factory, documentation, `.env.example`, and `docker-compose.yml`.
+  - Persist messages with an explicit encoding for binary fields. **Correction:** this ADR originally claimed that `m.model_dump(mode="json")` base64-encodes `bytes` transparently. It does not: Pydantic's default `ser_json_bytes="utf8"` decodes them as UTF-8 and raises on any non-UTF-8 signature, which aborted the whole save. Superseded by ADR-013, which tags and base64-encodes the signature at the persistence boundary and decodes it in a `ToolCall` validator.
+  - Standardize the active default Gemini model across application settings, factory, documentation, `.env.example`, and `docker-compose.yml`. **Correction:** this ADR originally named `gemini-2.0-flash`; the active default is `gemini-3.1-flash-lite` (`Settings.LLM_MODEL`, `create_llm_client`, `GeminiClient`).
 - **Consequences**:
   - Full compatibility with active and future reasoning-capable Gemini models.
   - Clean multi-turn tool calling without 400 or 404 errors.

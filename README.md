@@ -21,7 +21,7 @@ Designed from first principles for reliability, auditability, and production dep
 - **Declarative Type-Safe Tools**: Register Python functions with the `@tool` decorator. Function signatures, type hints, and docstrings are introspected into strict JSON Schema and dynamic Pydantic argument validators.
 - **Production Built-in Tools**:
   - `calculator`: AST-parsed mathematical evaluator with strict operator whitelisting and recursion/exponent limits.
-  - `sql_readonly`: Read-only SQL executor with single-SELECT AST validation, comment stripping, and DDL/DML blocking.
+  - `sql_readonly`: Read-only SQL executor over a dedicated non-superuser role (`DATABASE_READONLY_URL`, `default_transaction_read_only`, `SELECT`-only grants, fail-closed when unconfigured). A statement lexer accepts a single `SELECT`/`WITH`, rejects comments, DDL/DML and privileged built-ins (`pg_read_file`, `setval`, `query_to_xml`, …), and clamps `LIMIT ALL`/oversized limits in SQL.
   - `read_file`: Path traversal and symlink escape defended sandboxed file reader.
   - `http_fetch`: SSRF-protected HTTP client blocking private subnets, loopbacks, and cloud metadata endpoints.
   - `web_search`: Search provider adapter with result truncation.
