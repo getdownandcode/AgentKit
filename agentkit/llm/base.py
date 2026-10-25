@@ -86,6 +86,13 @@ class LLMResponse(BaseModel):
         default_factory=TokenUsage,
         description="Token consumption metadata.",
     )
+    refusal_reason: str | None = Field(
+        default=None,
+        description=(
+            "Set when the provider refused, filtered or blocked the response. The agent maps "
+            "it to RunStatus.REFUSED instead of treating an empty answer as success."
+        ),
+    )
     raw_metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Raw provider-specific metadata and response headers.",

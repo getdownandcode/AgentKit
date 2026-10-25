@@ -226,3 +226,18 @@ This log records significant architectural, technical, and design decisions made
 - **Consequences**:
   - Parallel tool calls work against Gemini, and identical parallel calls can be matched to their results in call order.
   - Internal reasoning never reaches the client through `final_answer` or stored history.
+
+---
+
+## ADR-015: Provider Refusals Are a Distinct Terminal Status
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: Neither adapter inspected the provider's own verdict. Gemini reports a blocked prompt through `prompt_feedback.block_reason` and a stopped generation through `candidate.finish_reason` (`SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`); OpenAI reports `finish_reason == "content_filter"` or a populated `message.refusal`. All of these arrive as an ordinary 200 response with no content and no tool calls, and the agent only branched on "are there tool calls?", so each was returned as `SUCCEEDED` with an empty `final_answer`.
+- **Decision**:
+  - `LLMResponse` carries an optional `refusal_reason`, populated by each adapter from the provider's block/refusal signals.
+  - `RunStatus` gains `refused`. The agent maps a refusal to that status with the provider's reason, and maps an empty completion (no text, no tool calls) to `failed` with an explicit "empty provider response" reason.
+  - A `SUCCEEDED` run always has a non-empty `final_answer`; the assistant turn is only appended to history when there is text.
+- **Consequences**:
+  - Operator dashboards and clients can distinguish "the model declined" from "the system broke" and from a genuine empty answer.
+  - The refusal reason is client-visible in `failure_reason`, which is safe: it is the provider's category, not prompt content.

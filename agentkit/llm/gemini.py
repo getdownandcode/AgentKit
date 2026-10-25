@@ -1,5 +1,6 @@
 """Google Gemini LLM provider adapter using the official google-genai SDK."""
 
+import re
 import uuid
 from typing import Any
 
@@ -10,6 +11,29 @@ from agentkit.core.errors import AuthenticationError, LLMProviderError
 from agentkit.core.types import Role
 from agentkit.llm.base import LLMClient, LLMResponse, Message, TokenUsage
 from agentkit.tools.models import ToolCall, ToolSchema
+
+#: Candidate finish reasons that mean the model stopped for safety or provenance reasons
+#: rather than completing an answer.
+_BLOCKED_FINISH_REASONS = frozenset(
+    {"SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY"}
+)
+
+_ENUM_LABEL_REGEX = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _enum_label(value: Any) -> str | None:
+    """Return an enum's canonical name, or None when the value is not one.
+
+    SDK enums render as ``FinishReason.SAFETY``; a plain string is accepted too. Anything
+    else — a test double's dynamic attribute, a missing field — yields None, so a mock cannot
+    be mistaken for a real block reason.
+    """
+    if value is None:
+        return None
+    name = getattr(value, "name", None)
+    candidate = name if isinstance(name, str) else str(value)
+    candidate = candidate.strip().rsplit(".", 1)[-1]
+    return candidate if _ENUM_LABEL_REGEX.match(candidate) else None
 
 
 class GeminiClient(LLMClient):
@@ -165,6 +189,7 @@ class GeminiClient(LLMClient):
             tool_calls: list[ToolCall] = []
             saw_thought_part = False
             saw_answer_text = False
+            refusal_reason = _gemini_refusal_reason(raw_response)
 
             candidates = getattr(raw_response, "candidates", None)
             if candidates:
@@ -215,12 +240,14 @@ class GeminiClient(LLMClient):
                 )
 
             text = "".join(text_parts).strip()
-            # ``raw_response.text`` concatenates every text part, thoughts included, so it is
-            # only a safe fallback when the response carried no parts to inspect at all.
+            # ``raw_response.text`` concatenates every text part, thoughts included, and raises
+            # on a blocked prompt. It is therefore only a fallback when the response carried
+            # no inspectable parts and was not refused.
             if (
                 not text
                 and not saw_answer_text
                 and not saw_thought_part
+                and refusal_reason is None
                 and getattr(raw_response, "text", None)
             ):
                 text = raw_response.text
@@ -245,5 +272,29 @@ class GeminiClient(LLMClient):
             text=text,
             tool_calls=tool_calls,
             usage=TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+            refusal_reason=refusal_reason,
             raw_metadata=metadata,
         )
+
+
+def _gemini_refusal_reason(raw_response: Any) -> str | None:
+    """Return why Gemini blocked this response, or None when it did not.
+
+    Two independent places report a block: ``prompt_feedback.block_reason`` for a prompt the
+    safety filters rejected outright, and the candidate's ``finish_reason`` for a generation
+    stopped mid-way. Neither is an error the SDK raises, so without this check a blocked
+    response looks like an empty successful answer.
+    """
+    feedback = getattr(raw_response, "prompt_feedback", None)
+    prompt_block = _enum_label(getattr(feedback, "block_reason", None))
+    if prompt_block is not None:
+        detail = getattr(feedback, "block_reason_message", None)
+        suffix = f": {detail.strip()}" if isinstance(detail, str) and detail.strip() else ""
+        return f"Gemini blocked the prompt ({prompt_block}){suffix}."
+
+    candidates = getattr(raw_response, "candidates", None)
+    if candidates:
+        finish_reason = _enum_label(getattr(candidates[0], "finish_reason", None))
+        if finish_reason in _BLOCKED_FINISH_REASONS:
+            return f"Gemini stopped the response ({finish_reason})."
+    return None

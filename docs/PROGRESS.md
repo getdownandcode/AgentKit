@@ -66,6 +66,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | stacked | 2 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
 | AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | stacked | 2 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
 | AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | stacked | 2 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
+| AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | stacked | 2 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
 
 ---
 
@@ -442,3 +443,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/session-history`
 - **Commits**: 2
 - **Notes**: Consecutive `tool` messages are now grouped into one `Content(role="user")` with one `function_response` part per call, satisfying Gemini's requirement that the response turn match the call turn part-for-part; two parallel calls to the same tool are emitted in call order with matching ids. The provider's `FunctionCall.id` is preserved end to end instead of being replaced by a random UUID, `FunctionResponse.id` is populated, and the outbound `FunctionCall` carries the id too. Response parsing skips `Part.thought=True` parts, so internal reasoning no longer leaks into `LLMResponse.text`, the persisted assistant turn or `final_answer`, while a thought part that carries a function call still yields that call and its signature; the `raw_response.text` fallback is now only used when the response had no inspectable parts. Covered by `tests/unit/test_gemini_wire_format.py`. Recorded in ADR-014.
+
+### AUDIT-07: Provider Refusal Status
+- **Status**: Done
+- **PR**: stacked on `fix/gemini-adapter`
+- **Commits**: 2
+- **Notes**: `LLMResponse` gained `refusal_reason`, populated from Gemini's `prompt_feedback.block_reason` (with `block_reason_message` when present) and from candidate `finish_reason` values in {SAFETY, RECITATION, PROHIBITED_CONTENT, BLOCKLIST, SPII, IMAGE_SAFETY}, and from OpenAI's `finish_reason == "content_filter"` or a non-empty `message.refusal`. `RunStatus` gained `refused`; the agent now maps a refusal to that status with the provider's reason, and an empty completion (no text, no tool calls) to `failed` with an explicit "Provider returned an empty response" reason, so a `succeeded` run always carries a non-empty answer. The `raw_response.text` fallback is skipped for refusals, since it raises on blocked prompts and would otherwise re-add reasoning text. `POST /runs` surfaces the refusal status and reason. Covered by `tests/unit/test_provider_refusals.py`. Recorded in ADR-015.

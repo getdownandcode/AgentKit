@@ -391,10 +391,53 @@ class Agent:
                                         )
                                         await self.trace.record(trace_record)
                         else:
-                            # Final natural language answer reached
+                            # No tool calls: this is the final answer, a provider refusal, or
+                            # an empty completion. Only a non-empty answer is a success; the
+                            # other two used to be reported as SUCCEEDED with a blank answer.
                             duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
+                            if response.text:
+                                messages.append(Message.assistant(response.text))
+
+                            if response.refusal_reason is not None:
+                                logger.warning(
+                                    "Provider refused the run: %s", response.refusal_reason
+                                )
+                                return await _finalize_and_return(
+                                    RunResult(
+                                        run_id=run_id,
+                                        session_id=session_id,
+                                        goal=goal,
+                                        status=RunStatus.REFUSED,
+                                        failure_reason=response.refusal_reason,
+                                        steps_count=steps_count,
+                                        total_input_tokens=total_input_tokens,
+                                        total_output_tokens=total_output_tokens,
+                                        duration_ms=duration_ms,
+                                    )
+                                )
+
+                            if not response.text.strip():
+                                logger.warning(
+                                    "Provider returned an empty response for run %s", run_id
+                                )
+                                return await _finalize_and_return(
+                                    RunResult(
+                                        run_id=run_id,
+                                        session_id=session_id,
+                                        goal=goal,
+                                        status=RunStatus.FAILED,
+                                        failure_reason=(
+                                            "Provider returned an empty response "
+                                            "(no text and no tool calls)."
+                                        ),
+                                        steps_count=steps_count,
+                                        total_input_tokens=total_input_tokens,
+                                        total_output_tokens=total_output_tokens,
+                                        duration_ms=duration_ms,
+                                    )
+                                )
+
                             logger.info("Agent run succeeded in %d ms", duration_ms)
-                            messages.append(Message.assistant(response.text))
                             return await _finalize_and_return(
                                 RunResult(
                                     run_id=run_id,
