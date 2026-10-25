@@ -211,3 +211,18 @@ This log records significant architectural, technical, and design decisions made
   - A conversation can no longer be silently replaced by a context-free one after a decode error or a Redis blip; the caller gets a 503 it can retry.
   - Sessions are bounded in Redis, and the bound is enforced at the only writer.
   - A stored history written by an older version stays readable, at the cost of an explicit legacy branch in the validator.
+
+---
+
+## ADR-014: Gemini Adapter Preserves Provider Call Ids and Excludes Thought Parts
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: The adapter emitted one `Content(role="user")` per tool result. Gemini validates that a turn answering a function-call turn carries the same number of `function_response` parts as the call turn had `function_call` parts, so every parallel tool call failed with `400 INVALID_ARGUMENT`. The provider's `FunctionCall.id` was discarded in favour of a fresh UUID and `FunctionResponse.id` was never set, so two parallel calls to the *same* tool could not be correlated at all. Separately, response parsing never inspected `Part.thought`, so internal reasoning text was concatenated into the answer, the persisted assistant turn and the API's `final_answer`; the `raw_response.text` fallback reintroduced it even after parts were filtered.
+- **Decision**:
+  - Consecutive `tool` messages are grouped into a single `Content(role="user")` with one `function_response` part per call, each carrying the id of the call it answers.
+  - The provider's `FunctionCall.id` is preserved end to end (a fresh UUID remains the fallback when the provider omits it), and is forwarded on the outbound `FunctionCall`.
+  - Parts with `thought=True` are excluded from the answer text but still yield their function call and thought signature. The `raw_response.text` fallback is used only when the response carried no inspectable parts.
+- **Consequences**:
+  - Parallel tool calls work against Gemini, and identical parallel calls can be matched to their results in call order.
+  - Internal reasoning never reaches the client through `final_answer` or stored history.

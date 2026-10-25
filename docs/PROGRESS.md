@@ -65,6 +65,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-18 | AUDIT | Compose Datastore Hardening | `chore/compose-hardening` | stacked | 1 | Done | Loopback-only datastore ports, required Postgres/Redis passwords, fail-closed credential guard |
 | AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | stacked | 2 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
 | AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | stacked | 2 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
+| AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | stacked | 2 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
 
 ---
 
@@ -435,3 +436,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/persistence-integrity`
 - **Commits**: 2
 - **Notes**: Gemini `thought_signature` is persisted as an explicitly tagged base64 object (`{"base64": "..."}`) and decoded by a `ToolCall` field validator, so arbitrary binary round-trips byte-for-byte instead of raising `UnicodeDecodeError` inside `model_dump(mode="json")` and aborting the whole save; legacy UTF-8-encoded signatures remain readable. A corrupt or unreadable history now raises the new `SessionHistoryError` (503) with an ERROR log carrying the session id, instead of being read as an empty conversation that the next run overwrote — the agent also marks the run failed rather than leaving it `running`. `SESSION_MAX_MESSAGES` (default 40) is wired through `get_memory_store`, documents in `.env.example`/`docs/SPEC.md`, and `RedisMemoryStore.truncate_messages` advances its cut point past leading tool results so the kept history is always provider-valid. Covered by `tests/unit/test_session_history.py` (binary round trips, tagged encoding, legacy read, corrupt payload, agent fail-closed behaviour, every truncation cut point, storage bound, settings wiring).
+
+### AUDIT-05 / AUDIT-06: Gemini Wire-Format Fidelity
+- **Status**: Done
+- **PR**: stacked on `fix/session-history`
+- **Commits**: 2
+- **Notes**: Consecutive `tool` messages are now grouped into one `Content(role="user")` with one `function_response` part per call, satisfying Gemini's requirement that the response turn match the call turn part-for-part; two parallel calls to the same tool are emitted in call order with matching ids. The provider's `FunctionCall.id` is preserved end to end instead of being replaced by a random UUID, `FunctionResponse.id` is populated, and the outbound `FunctionCall` carries the id too. Response parsing skips `Part.thought=True` parts, so internal reasoning no longer leaks into `LLMResponse.text`, the persisted assistant turn or `final_answer`, while a thought part that carries a function call still yields that call and its signature; the `raw_response.text` fallback is now only used when the response had no inspectable parts. Covered by `tests/unit/test_gemini_wire_format.py`. Recorded in ADR-014.

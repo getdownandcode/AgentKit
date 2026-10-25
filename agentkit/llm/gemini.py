@@ -67,8 +67,13 @@ class GeminiClient(LLMClient):
                 for tc in msg.tool_calls:
                     tool_id_to_name[tc.id] = tc.name
 
-        # Convert messages
-        for msg in messages:
+        # Convert messages. Consecutive tool results are grouped into a single user turn:
+        # Gemini validates that the number of function_response parts equals the number of
+        # function_call parts in the turn being answered, so emitting one Content per result
+        # makes every parallel tool call fail with 400 INVALID_ARGUMENT.
+        index = 0
+        while index < len(messages):
+            msg = messages[index]
             if msg.role == Role.SYSTEM:
                 system_instruction = msg.content
             elif msg.role == Role.USER:
@@ -83,39 +88,38 @@ class GeminiClient(LLMClient):
                 if msg.content:
                     parts.append(types.Part.from_text(text=msg.content))
                 for tc in msg.tool_calls:
-                    if tc.thought_signature is not None:
-                        parts.append(
-                            types.Part(
-                                function_call=types.FunctionCall(
-                                    name=tc.name,
-                                    args=tc.arguments,
-                                ),
-                                thought_signature=tc.thought_signature,
-                            )
-                        )
-                    else:
-                        parts.append(
-                            types.Part.from_function_call(
+                    # The provider's call id is forwarded verbatim so its response can be
+                    # correlated; a random uuid would break two parallel calls to one tool.
+                    parts.append(
+                        types.Part(
+                            function_call=types.FunctionCall(
+                                id=tc.id,
                                 name=tc.name,
                                 args=tc.arguments,
-                            )
+                            ),
+                            thought_signature=tc.thought_signature,
                         )
+                    )
                 contents.append(types.Content(role="model", parts=parts))
             elif msg.role == Role.TOOL:
-                tool_name = (
-                    tool_id_to_name.get(msg.tool_call_id or "") or msg.tool_call_id or "tool"
-                )
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_function_response(
+                response_parts: list[types.Part] = []
+                while index < len(messages) and messages[index].role == Role.TOOL:
+                    tool_msg = messages[index]
+                    call_id = tool_msg.tool_call_id
+                    tool_name = tool_id_to_name.get(call_id or "") or call_id or "tool"
+                    response_parts.append(
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                id=call_id,
                                 name=tool_name,
-                                response={"result": msg.content},
+                                response={"result": tool_msg.content},
                             )
-                        ],
+                        )
                     )
-                )
+                    index += 1
+                contents.append(types.Content(role="user", parts=response_parts))
+                continue
+            index += 1
 
         # Convert tools to Gemini FunctionDeclarations
         config_tools: list[Any] | None = None
@@ -159,24 +163,42 @@ class GeminiClient(LLMClient):
         try:
             text_parts: list[str] = []
             tool_calls: list[ToolCall] = []
+            saw_thought_part = False
+            saw_answer_text = False
 
             candidates = getattr(raw_response, "candidates", None)
             if candidates:
                 candidate = candidates[0]
                 if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
-                        if getattr(part, "text", None):
+                        # ``thought=True`` marks internal reasoning. It belongs in neither the
+                        # answer, the persisted assistant turn, nor the API response. The
+                        # check is a strict ``is True`` because test doubles and partial SDK
+                        # shapes expose attributes that are truthy without being booleans.
+                        if getattr(part, "thought", False) is True:
+                            saw_thought_part = True
+                        elif getattr(part, "text", None):
                             text_parts.append(part.text)
+                            saw_answer_text = True
+
+                        # A thought part may still carry a function call; the call and its
+                        # signature must survive even though its text is discarded.
                         if getattr(part, "function_call", None):
                             fc = part.function_call
                             raw_sig = getattr(part, "thought_signature", None)
                             sig = raw_sig if isinstance(raw_sig, bytes) else None
+                            provider_id = getattr(fc, "id", None)
                             tool_calls.append(
                                 ToolCall(
-                                    # Full UUID: tool_call_id is the join key between an
-                                    # assistant tool call and its tool result, so a truncated
-                                    # 32-bit id risks collisions within a long session.
-                                    id=str(uuid.uuid4()),
+                                    # The provider's own id is the join key between a call and
+                                    # its result, so it is preserved when present. A full UUID
+                                    # is the fallback: a truncated 32-bit id would collide
+                                    # within a long session.
+                                    id=(
+                                        provider_id
+                                        if isinstance(provider_id, str) and provider_id
+                                        else str(uuid.uuid4())
+                                    ),
                                     name=fc.name,
                                     arguments=dict(fc.args or {}),
                                     thought_signature=sig,
@@ -193,7 +215,14 @@ class GeminiClient(LLMClient):
                 )
 
             text = "".join(text_parts).strip()
-            if not text and getattr(raw_response, "text", None):
+            # ``raw_response.text`` concatenates every text part, thoughts included, so it is
+            # only a safe fallback when the response carried no parts to inspect at all.
+            if (
+                not text
+                and not saw_answer_text
+                and not saw_thought_part
+                and getattr(raw_response, "text", None)
+            ):
                 text = raw_response.text
 
             metadata: dict[str, Any] = {}
