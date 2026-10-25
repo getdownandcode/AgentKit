@@ -29,17 +29,20 @@ class PostgresTraceSink(TraceSink):
             run_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, trace.run_id)
 
         async with self._session_factory() as session, session.begin():
-            # Ensure parent Run record exists to satisfy foreign key constraints
+            # A telemetry sink must never invent a business record. Without its own run row the
+            # step has no parent for the foreign key, and a fabricated Run would report a
+            # placeholder goal, a lost session id and a stale "running" status as if they were
+            # real. The caller (Agent.run -> MemoryStore.create_run) owns Run creation, so a
+            # missing parent here means the step is dropped, loudly.
             run = await session.get(Run, run_uuid)
             if run is None:
-                run = Run(
-                    id=run_uuid,
-                    session_id=None,
-                    goal="Agent Execution",
-                    status="running",
-                    created_at=trace.timestamp,
+                logger.error(
+                    "Dropping step %d for run %s: no parent run row exists; create the run "
+                    "before recording its traces.",
+                    trace.step_no,
+                    trace.run_id,
                 )
-                session.add(run)
+                return
 
             step_record = Step(
                 id=uuid.uuid4(),

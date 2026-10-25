@@ -7,6 +7,10 @@ from typing import Any
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+#: Width of the session id column. The API enforces the same limit at the request boundary,
+#: so an over-long id is a 422 instead of a database error the caller cannot see.
+SESSION_ID_MAX_LENGTH = 255
+
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy declarative models."""
@@ -23,7 +27,7 @@ class Run(Base):
         default=uuid.uuid4,
     )
     session_id: Mapped[str | None] = mapped_column(
-        String(255),
+        String(SESSION_ID_MAX_LENGTH),
         nullable=True,
         index=True,
     )

@@ -62,7 +62,10 @@ async def test_json_columns_round_trip_nested_payloads(
 ) -> None:
     """Nested args/results must round-trip through PostgreSQL's JSON column type."""
     sink = PostgresTraceSink(session_factory=real_session_factory)
+    store = PostgresMemoryStore(session_factory=real_session_factory)
     run_id = str(uuid.uuid4())
+    # A step row has a foreign key to its run; the sink never invents that parent.
+    await store.create_run(run_id=run_id, goal="JSON round trip")
 
     args: dict[str, object] = {
         "expression": "2 + 2",
@@ -93,10 +96,10 @@ async def test_json_columns_round_trip_nested_payloads(
     assert traces[0].timestamp == created
 
 
-async def test_trace_sink_creates_missing_parent_run(
+async def test_trace_sink_drops_steps_without_a_parent_run(
     real_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Recording a step without a prior create_run must still satisfy the FK."""
+    """A missing parent means the step is dropped, never invented into a placeholder run."""
     sink = PostgresTraceSink(session_factory=real_session_factory)
     run_id = str(uuid.uuid4())
 
@@ -113,10 +116,9 @@ async def test_trace_sink_creates_missing_parent_run(
 
     async with real_session_factory() as session:
         parent = await session.get(Run, uuid.UUID(run_id))
-        assert parent is not None, "PostgresTraceSink must auto-create the parent Run row"
-        assert parent.status == "running"
+        assert parent is None, "telemetry must not fabricate a business record"
 
-    assert len(await sink.get_traces(run_id)) == 1
+    assert await sink.get_traces(run_id) == []
 
 
 async def test_foreign_key_cascade_deletes_steps(
@@ -124,7 +126,9 @@ async def test_foreign_key_cascade_deletes_steps(
 ) -> None:
     """ON DELETE CASCADE must remove steps; SQLite does not enforce this by default."""
     sink = PostgresTraceSink(session_factory=real_session_factory)
+    store = PostgresMemoryStore(session_factory=real_session_factory)
     run_id = str(uuid.uuid4())
+    await store.create_run(run_id=run_id, goal="Cascade probe")
 
     for step_no in (1, 2, 3):
         await sink.record(

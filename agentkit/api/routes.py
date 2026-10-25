@@ -23,7 +23,7 @@ from agentkit.api.schemas import (
     ToolsListResponse,
 )
 from agentkit.core.agent import Agent
-from agentkit.core.errors import RunNotFoundError
+from agentkit.core.errors import PersistenceError, RunNotFoundError
 from agentkit.core.trace import StepTrace, TraceSink
 from agentkit.memory.base import MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
@@ -60,20 +60,31 @@ async def create_run(
 
     if hasattr(memory_store, "get_run"):
         run_record = await memory_store.get_run(result.run_id)
-        if run_record is not None:
-            return RunResponse(
-                run_id=run_record.id,
-                session_id=run_record.session_id,
-                goal=run_record.goal,
-                status=run_record.status,
-                answer=run_record.final_answer,
-                failure_reason=run_record.failure_reason,
-                total_input_tokens=run_record.total_input_tokens,
-                total_output_tokens=run_record.total_output_tokens,
-                created_at=run_record.created_at,
-                finished_at=run_record.finished_at,
+        if run_record is None:
+            # The agent reported a finished run that the store does not have. Synthesising a
+            # 200 here is what made a lost run look successful; surface the broken guarantee
+            # instead, so the client never believes in a record it cannot fetch.
+            logger.error(
+                "Run %s finished but could not be read back from the store.", result.run_id
             )
+            raise PersistenceError(
+                f"Run {result.run_id} could not be read back after execution.",
+                run_id=result.run_id,
+            )
+        return RunResponse(
+            run_id=run_record.id,
+            session_id=run_record.session_id,
+            goal=run_record.goal,
+            status=run_record.status,
+            answer=run_record.final_answer,
+            failure_reason=run_record.failure_reason,
+            total_input_tokens=run_record.total_input_tokens,
+            total_output_tokens=run_record.total_output_tokens,
+            created_at=run_record.created_at,
+            finished_at=run_record.finished_at,
+        )
 
+    # Stores without run persistence (in-memory test doubles) can only echo the result.
     now = datetime.now(UTC)
     return RunResponse(
         run_id=result.run_id,

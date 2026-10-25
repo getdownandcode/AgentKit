@@ -3,15 +3,17 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agentkit.core.agent import Agent
 from agentkit.core.pg_trace import PostgresTraceSink
 from agentkit.core.trace import StepTrace
 from agentkit.core.types import RunStatus
-from agentkit.db.models import Base
+from agentkit.db.models import Base, Run
 from agentkit.llm.base import LLMResponse, TokenUsage
 from agentkit.llm.fake import FakeLLMClient
+from agentkit.memory.pg_store import PostgresMemoryStore
 from agentkit.tools.models import ToolCall
 from agentkit.tools.registry import ToolRegistry, tool
 
@@ -34,6 +36,10 @@ async def test_postgres_trace_sink_record_and_get(
 ) -> None:
     sink = PostgresTraceSink(session_factory=async_session_factory)
     test_run_id = str(uuid.uuid4())
+    # The trace sink never creates the parent record: the run store owns it.
+    await PostgresMemoryStore(async_session_factory).create_run(
+        run_id=test_run_id, goal="Trace round trip"
+    )
 
     # Step 1
     trace1 = StepTrace(
@@ -117,7 +123,12 @@ async def test_agent_with_postgres_trace_sink(
         ]
     )
 
-    agent = Agent(llm=llm, registry=registry, trace=sink)
+    agent = Agent(
+        llm=llm,
+        registry=registry,
+        memory=PostgresMemoryStore(async_session_factory),
+        trace=sink,
+    )
     result = await agent.run(goal="What is 6 * 7?")
 
     assert result.status == RunStatus.SUCCEEDED
@@ -139,6 +150,9 @@ async def test_postgres_trace_sink_non_uuid_string(
 ) -> None:
     sink = PostgresTraceSink(session_factory=async_session_factory)
     custom_run_id = "custom-arbitrary-run-identifier-123"
+    await PostgresMemoryStore(async_session_factory).create_run(
+        run_id=custom_run_id, goal="Deterministic uuid fallback"
+    )
 
     trace = StepTrace(
         run_id=custom_run_id,
@@ -153,3 +167,24 @@ async def test_postgres_trace_sink_non_uuid_string(
     assert len(traces) == 1
     assert traces[0].step_no == 1
     assert traces[0].tool_name == "test_tool"
+
+
+@pytest.mark.asyncio
+async def test_trace_sink_never_fabricates_a_placeholder_run(
+    async_session_factory: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A missing parent run means the step is dropped loudly, not invented into existence."""
+    sink = PostgresTraceSink(session_factory=async_session_factory)
+    run_id = str(uuid.uuid4())
+    trace = StepTrace(run_id=run_id, step_no=1, tool_name="calculator", args={})
+
+    with caplog.at_level("ERROR", logger="agentkit.core.pg_trace"):
+        await sink.record(trace)
+
+    async with async_session_factory() as session:
+        runs = (await session.execute(select(Run))).scalars().all()
+
+    assert runs == [], "a telemetry sink must never insert a business record"
+    assert await sink.get_traces(run_id) == []
+    assert any("no parent run row exists" in record.message for record in caplog.records)

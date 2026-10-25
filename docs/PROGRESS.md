@@ -63,6 +63,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M13-T06 | M13       | Whole-Project Audit Remediation | `fix/audit-hardening` | #47 | 3 | Done | Fail-closed config and LLM resolution, SSRF post-connect check, atomic fallback |
 | AUDIT-01/02 | AUDIT | Read-Only SQL Isolation and Row Cap | `fix/sql-readonly-isolation` | stacked | 2 | Done | Dedicated non-superuser role, dollar-quote/E-string masking, built-in denylist, clamped server-side row cap |
 | AUDIT-18 | AUDIT | Compose Datastore Hardening | `chore/compose-hardening` | stacked | 1 | Done | Loopback-only datastore ports, required Postgres/Redis passwords, fail-closed credential guard |
+| AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | stacked | 2 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
 
 ---
 
@@ -421,3 +422,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/sql-readonly-isolation`
 - **Commits**: 1
 - **Notes**: `docker-compose.yml` no longer publishes PostgreSQL or Redis with weak/no credentials. Both datastores bind loopback by default (`POSTGRES_BIND`/`REDIS_BIND`, `0.0.0.0` is a documented opt-in), `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD` and `REDIS_PASSWORD` are required by compose interpolation instead of defaulting to `postgres`/empty, Redis starts with `redis-server --requirepass` sourced from the environment and its healthcheck authenticates, and the api service's `REDIS_URL` carries the password. `scripts/check_deploy_credentials.py` runs ahead of migrations and fails closed on image defaults, documented placeholders, short passwords, a read-only role equal to the application role, a shared password, a missing `DATABASE_READONLY_URL` or a passwordless `REDIS_URL`. The migrations service also provisions the read-only role after seeding. Verified with `docker compose config` (required-variable failure), a live Redis container (`NOAUTH` unauthenticated, `PONG` authenticated, healthy) and the guard CLI. Documented in `docs/DEPLOY.md`.
+
+### AUDIT-03 / AUDIT-08 / AUDIT-09: Persistence Integrity
+- **Status**: Done
+- **PR**: stacked on `chore/compose-hardening`
+- **Commits**: 2
+- **Notes**: Persistence is no longer best-effort. `Agent.run` logs and raises the new `PersistenceError` (HTTP 503, code `PERSISTENCE_ERROR`) when `create_run` fails, so the loop never executes for a run nobody can read back; a failed final `update_run` is retried once with `status=failed` so a transient fault cannot leave the row stuck in `running`. `POST /runs` no longer synthesises a 200 from the in-memory result when the store cannot return the record — it raises `PersistenceError`, and `GET /runs/{id}` still returns 404 for a run that was never persisted. `PostgresTraceSink` no longer fabricates a placeholder `Run` (`goal="Agent Execution"`, `session_id=None`, `status="running"`); it logs an error and drops the step when the parent row is missing, leaving `create_run` as the only writer of run rows. `session_id` is bounded at the request boundary (`max_length=255`, shared with the `String(255)` column through `SESSION_ID_MAX_LENGTH`), so an over-long id is a 422 before any agent work instead of a swallowed insert error. Covered by `tests/integration/test_persistence_integrity.py`, `tests/unit/test_pg_trace.py` and updated live-PostgreSQL tests in `tests/real/test_postgres_real.py`.

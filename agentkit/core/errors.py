@@ -164,6 +164,20 @@ class ServiceUnavailableError(AgentKitError):
         self.service = service
 
 
+class PersistenceError(ServiceUnavailableError):
+    """Raised when a run or its conversation history could not be persisted.
+
+    Persistence is not best-effort: a run the caller cannot read back must not be reported as
+    a success. The error maps to HTTP 503 through :func:`map_agentkit_error_status`, because
+    the cause is the backing store rather than the request.
+    """
+
+    def __init__(self, message: str, run_id: str | None = None) -> None:
+        super().__init__("persistence", message)
+        self.code = "PERSISTENCE_ERROR"
+        self.run_id = run_id
+
+
 # Aliases for convenience
 ToolNotFoundError = ToolNotFound
 LLMRateLimitError = RateLimitExceededError
