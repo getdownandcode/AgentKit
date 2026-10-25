@@ -1,5 +1,6 @@
 """OpenAI LLM provider adapter using the official openai SDK."""
 
+import inspect
 import json
 import logging
 import os
@@ -43,6 +44,14 @@ class OpenAIClient(LLMClient):
             raise AuthenticationError(
                 "OpenAI API key not configured. Set OPENAI_API_KEY environment variable or pass api_key."
             )
+
+    async def aclose(self) -> None:
+        """Close the underlying AsyncOpenAI client and its connection pool."""
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
 
     async def chat(
         self,

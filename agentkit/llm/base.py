@@ -102,6 +102,15 @@ class LLMResponse(BaseModel):
 class LLMClient(ABC):
     """Abstract interface defining required behavior for all LLM provider adapters."""
 
+    async def aclose(self) -> None:
+        """Release provider resources held by this client.
+
+        Provider clients own HTTP transports and connection pools, so they must be closed
+        when the application shuts down rather than left to garbage collection. The default
+        is a no-op for in-process implementations such as the scripted fake client.
+        """
+        return None
+
     @abstractmethod
     async def chat(
         self,

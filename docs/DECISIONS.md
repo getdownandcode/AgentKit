@@ -241,3 +241,19 @@ This log records significant architectural, technical, and design decisions made
 - **Consequences**:
   - Operator dashboards and clients can distinguish "the model declined" from "the system broke" and from a genuine empty answer.
   - The refusal reason is client-visible in `failure_reason`, which is safe: it is the provider's category, not prompt content.
+
+---
+
+## ADR-016: One Application-Owned Provider Client, Closed on Shutdown
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: `get_llm_client` called `create_llm_client_from_settings` on every request. Each `AsyncOpenAI` / `genai.Client` owns its own HTTP transport and connection pool, and nothing closed them: the lifespan only disposed of Redis and the database engine. Long-running processes leaked sockets and file descriptors and never pooled provider connections. Closing is adapter-specific — `genai.Client.close()` does not close the async transport used by `client.aio`, which needs `client.aio.aclose()`.
+- **Decision**:
+  - `LLMClient` gains a concrete `aclose()` that defaults to a no-op; both provider adapters override it (Gemini prefers `aio.aclose()`, OpenAI awaits `close()`) and `RetryingLLMClient` delegates to the client it wraps.
+  - `get_llm_client` builds the provider once and stores it on `app.state.managed_llm_client`; the lifespan closes it before releasing Redis and the database engine.
+  - An explicit `app.state.llm_client` override still wins and stays caller-owned: tests and embedders that inject a client are responsible for its lifetime.
+- **Consequences**:
+  - N requests use one provider client and one connection pool, and shutdown releases it.
+  - A construction failure is still deferred to the first request and surfaced as a 503, so a missing API key does not stop the process (or the test suite) from starting.
+  - The retry wrapper remains the outermost layer, so it still wraps the shared client and forwards `aclose`.

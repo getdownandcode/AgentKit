@@ -63,13 +63,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        # A provider client built lazily by get_llm_client is owned by this application, so
+        # its transport is closed here. An app.state.llm_client override is caller-owned.
+        managed_llm: Any = getattr(app.state, "managed_llm_client", None)
+        if managed_llm is not None:
+            try:
+                await managed_llm.aclose()
+            except Exception as exc:
+                logger.warning("Failed to close LLM client: %s", exc)
+            app.state.managed_llm_client = None
+
         aclose_fn = getattr(redis_client, "aclose", None)
         if callable(aclose_fn):
             await aclose_fn()
         else:
             await redis_client.close()
         await engine.dispose()
-        logger.info("Application lifespan torn down (DB & Redis resources released).")
+        logger.info("Application lifespan torn down (LLM, DB & Redis resources released).")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

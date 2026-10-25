@@ -158,6 +158,10 @@ class RetryingLLMClient(LLMClient):
             jitter=self._jitter,
         )(self._client.chat)
 
+    async def aclose(self) -> None:
+        """Close the wrapped client so the retry wrapper does not hide the transport."""
+        await self._client.aclose()
+
     async def chat(
         self,
         messages: list[Message],

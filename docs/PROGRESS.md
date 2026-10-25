@@ -67,6 +67,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | stacked | 2 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
 | AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | stacked | 2 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
 | AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | stacked | 2 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
+| AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | stacked | 2 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
 
 ---
 
@@ -449,3 +450,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/gemini-adapter`
 - **Commits**: 2
 - **Notes**: `LLMResponse` gained `refusal_reason`, populated from Gemini's `prompt_feedback.block_reason` (with `block_reason_message` when present) and from candidate `finish_reason` values in {SAFETY, RECITATION, PROHIBITED_CONTENT, BLOCKLIST, SPII, IMAGE_SAFETY}, and from OpenAI's `finish_reason == "content_filter"` or a non-empty `message.refusal`. `RunStatus` gained `refused`; the agent now maps a refusal to that status with the provider's reason, and an empty completion (no text, no tool calls) to `failed` with an explicit "Provider returned an empty response" reason, so a `succeeded` run always carries a non-empty answer. The `raw_response.text` fallback is skipped for refusals, since it raises on blocked prompts and would otherwise re-add reasoning text. `POST /runs` surfaces the refusal status and reason. Covered by `tests/unit/test_provider_refusals.py`. Recorded in ADR-015.
+
+### AUDIT-12 / AUDIT-13 / AUDIT-14: Tool Schemas, Client Lifecycle and Settings
+- **Status**: Done
+- **PR**: stacked on `fix/provider-refusal-status`
+- **Commits**: 2
+- **Notes**: Generated tool schemas now carry Pydantic's `$defs` (plus `additionalProperties`, per-property titles and defaults) so every `$ref` resolves inside the emitted document; the redundant top-level `title` is dropped and simple built-in schemas stay byte-identical. The LLM provider client is built once per application on `app.state.managed_llm_client` and closed by the lifespan (`aio.aclose()` for Gemini, `close()` for OpenAI, forwarded through `RetryingLLMClient`), instead of one unclosed client per request; explicit `app.state.llm_client` overrides remain caller-owned. `TOOL_OUTPUT_MAX_CHARS` is wired into `AgentConfig` and the compose `api` service now forwards every setting documented in `.env.example` (`MAX_STEPS`, `TOOL_TIMEOUT_S`, `TOOL_OUTPUT_MAX_CHARS`, `SESSION_TTL_S`, `SESSION_MAX_MESSAGES`, `RATE_LIMIT_PER_MIN`, `SEARCH_API_KEY`, `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_DELAY_S`, `LLM_RETRY_MAX_DELAY_S`). Covered by `tests/unit/test_tools_resources_config.py`, including a check that every documented setting appears in compose. Recorded in ADR-016.

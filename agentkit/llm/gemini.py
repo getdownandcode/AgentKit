@@ -67,6 +67,21 @@ class GeminiClient(LLMClient):
                     f"Gemini API key not configured and default credentials failed: {e}"
                 ) from e
 
+    async def aclose(self) -> None:
+        """Close the underlying SDK client and its async HTTP transport.
+
+        The synchronous ``Client.close()`` does not close the async transport used by
+        ``client.aio``, so the async path is preferred and the sync one is only a fallback.
+        """
+        aio = getattr(self._client, "aio", None)
+        aclose = getattr(aio, "aclose", None)
+        if callable(aclose):
+            await aclose()
+            return
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            close()
+
     async def chat(
         self,
         messages: list[Message],

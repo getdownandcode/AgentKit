@@ -102,7 +102,19 @@ services:
       - DATABASE_READONLY_URL=${DATABASE_READONLY_URL:-postgresql+asyncpg://${POSTGRES_READONLY_USER:-agentkit_readonly}:${POSTGRES_READONLY_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
       - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
+      # Every setting documented in .env.example is forwarded, so a containerised deployment
+      # does not silently run with defaults that differ from the documented ones.
       - RUN_TIMEOUT_S=${RUN_TIMEOUT_S:-60}
+      - MAX_STEPS=${MAX_STEPS:-10}
+      - TOOL_TIMEOUT_S=${TOOL_TIMEOUT_S:-15}
+      - TOOL_OUTPUT_MAX_CHARS=${TOOL_OUTPUT_MAX_CHARS:-2000}
+      - SESSION_TTL_S=${SESSION_TTL_S:-3600}
+      - SESSION_MAX_MESSAGES=${SESSION_MAX_MESSAGES:-40}
+      - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-30}
+      - SEARCH_API_KEY=${SEARCH_API_KEY:-}
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
+      - LLM_RETRY_BASE_DELAY_S=${LLM_RETRY_BASE_DELAY_S:-0.5}
+      - LLM_RETRY_MAX_DELAY_S=${LLM_RETRY_MAX_DELAY_S:-10}
       # No default key. An unset or empty API_KEYS leaves the api service to fail at
       # startup on Settings validation rather than running with a published key.
       # Compose keeps ${VAR:-} so `down`, `ps` and `logs` still work without it.
