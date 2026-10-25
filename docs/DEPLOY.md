@@ -178,6 +178,10 @@ Fetch production secrets dynamically using the AWS CLI:
 # Create parameters in AWS SSM
 aws ssm put-parameter --name "/agentkit/production/DATABASE_PASSWORD" \
     --value "$(openssl rand -hex 24)" --type "SecureString"
+aws ssm put-parameter --name "/agentkit/production/READONLY_PASSWORD" \
+    --value "$(openssl rand -hex 24)" --type "SecureString"
+aws ssm put-parameter --name "/agentkit/production/REDIS_PASSWORD" \
+    --value "$(openssl rand -hex 24)" --type "SecureString"
 aws ssm put-parameter --name "/agentkit/production/API_KEYS" \
     --value "prod_key_$(openssl rand -hex 16)" --type "SecureString"
 aws ssm put-parameter --name "/agentkit/production/GEMINI_API_KEY" \
@@ -189,15 +193,21 @@ cat << 'EOF' > /opt/agentkit/fetch_secrets.sh
 set -euo pipefail
 
 DB_PASS=$(aws ssm get-parameter --name "/agentkit/production/DATABASE_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
+RO_PASS=$(aws ssm get-parameter --name "/agentkit/production/READONLY_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
+REDIS_PASS=$(aws ssm get-parameter --name "/agentkit/production/REDIS_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
 API_KEYS=$(aws ssm get-parameter --name "/agentkit/production/API_KEYS" --with-decryption --query "Parameter.Value" --output text)
 GEMINI_KEY=$(aws ssm get-parameter --name "/agentkit/production/GEMINI_API_KEY" --with-decryption --query "Parameter.Value" --output text)
 
 cat << ENVFILE > /opt/agentkit/.env
 DATABASE_URL=postgresql+asyncpg://agentkit:${DB_PASS}@postgres:5432/agentkit
+DATABASE_READONLY_URL=postgresql+asyncpg://agentkit_readonly:${RO_PASS}@postgres:5432/agentkit
 POSTGRES_USER=agentkit
 POSTGRES_PASSWORD=${DB_PASS}
+POSTGRES_READONLY_USER=agentkit_readonly
+POSTGRES_READONLY_PASSWORD=${RO_PASS}
 POSTGRES_DB=agentkit
-REDIS_URL=redis://redis:6379/0
+REDIS_PASSWORD=${REDIS_PASS}
+REDIS_URL=redis://:${REDIS_PASS}@redis:6379/0
 LLM_PROVIDER=gemini
 LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=${GEMINI_KEY}
@@ -220,6 +230,39 @@ If configuring manually, create `/opt/agentkit/.env` from `.env.example`:
 ```bash
 cp .env.example .env
 chmod 600 .env  # Restrict permissions: read/write only for owner
+```
+
+### Datastore Exposure and Credentials
+
+The compose stack treats PostgreSQL and Redis as internal services, because everything it
+stores — run goals, final answers, full conversation history, rate-limit counters — is
+readable by anyone who can reach those ports.
+
+- **Loopback-only ports by default.** `postgres` and `redis` publish on `127.0.0.1`
+  (`${POSTGRES_BIND:-127.0.0.1}` / `${REDIS_BIND:-127.0.0.1}`). Containers reach each other
+  over `agentkit-net`; the host mapping exists only for local inspection. Setting
+  `POSTGRES_BIND=0.0.0.0` or `REDIS_BIND=0.0.0.0` is a deliberate opt-in — do not do it on a
+  shared host or CI runner without a firewall rule in front.
+- **No default passwords.** Compose requires `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD`
+  and `REDIS_PASSWORD`; interpolation fails when one is missing instead of silently falling
+  back to `postgres`/`postgres` or an unauthenticated Redis. Generate each one with
+  `openssl rand -base64 24`.
+- **Redis authenticates.** The service starts with `redis-server --requirepass` sourced from
+  `REDIS_PASSWORD`, and `REDIS_URL` must carry the same password. The healthcheck authenticates
+  too, so a password mismatch surfaces as an unhealthy container rather than 401s at runtime.
+- **The guard fails closed.** The `migrations` service runs
+  `python scripts/check_deploy_credentials.py` before anything else. It rejects the image
+  defaults, the documented placeholders, short passwords, a missing read-only URL, a read-only
+  role equal to the application role, and a `REDIS_URL` without a password.
+- **Read-only SQL role.** `python scripts/init_readonly_role.py` provisions
+  `POSTGRES_READONLY_USER` with `CONNECT`/`USAGE`/`SELECT` only and
+  `default_transaction_read_only = on`. The `sql_readonly` tool connects with it and refuses to
+  run when `DATABASE_READONLY_URL` is absent, so the agent never touches the application role.
+
+Verify the effective configuration before starting the stack:
+
+```bash
+docker compose config | grep -E "POSTGRES_BIND|REDIS_BIND|requirepass|DATABASE_READONLY_URL"
 ```
 
 ---

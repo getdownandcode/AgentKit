@@ -5,10 +5,14 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Required: no default password. Compose refuses to start the stack instead of
+      # publishing a database with database credentials anyone can guess.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set to a non-default value}
       POSTGRES_DB: ${POSTGRES_DB:-agentkit}
     ports:
-      - "5432:5432"
+      # Loopback-only by default: nothing outside this host can reach the database.
+      # Set POSTGRES_BIND=0.0.0.0 deliberately if you need remote access (see docs/DEPLOY.md).
+      - "${POSTGRES_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,12 +28,20 @@ services:
     image: redis:7-alpine
     container_name: agentkit-redis
     restart: unless-stopped
+    environment:
+      # Read inside the container by the command and healthcheck below, so the password is
+      # never part of the process arguments that `docker inspect` would expose.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set so Redis is not unauthenticated}
+    # `--requirepass` with an empty value would silently accept unauthenticated clients, so
+    # the variable is required by the interpolation above rather than defaulted to empty.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$${REDIS_PASSWORD}\""]
     ports:
-      - "6379:6379"
+      # Loopback-only by default; see POSTGRES_BIND above for the deliberate opt-in.
+      - "${REDIS_BIND:-127.0.0.1}:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -43,16 +55,28 @@ services:
       dockerfile: Dockerfile
     container_name: agentkit-migrations
     restart: "no"
-    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py"]
+    # The credential guard runs first: a placeholder or default secret stops the stack before
+    # any schema change, rather than surfacing as an insecure deployment. The read-only role
+    # is provisioned after migrations so its SELECT grants cover the real tables.
+    command:
+      - "sh"
+      - "-c"
+      - "python scripts/check_deploy_credentials.py && alembic upgrade head && python scripts/seed.py && python scripts/init_readonly_role.py"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
+      - DATABASE_READONLY_URL=${DATABASE_READONLY_URL:-postgresql+asyncpg://${POSTGRES_READONLY_USER:-agentkit_readonly}:${POSTGRES_READONLY_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
       # Settings validation requires API_KEYS, and both alembic and the seed script
       # construct Settings. Passed through so the compose stack fails closed here,
       # with the same validation error, rather than in the api service.
       - API_KEYS=${API_KEYS:-}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_READONLY_PASSWORD=${POSTGRES_READONLY_PASSWORD:?POSTGRES_READONLY_PASSWORD must be set for the dedicated read-only role}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     networks:
       - agentkit-net
 
@@ -72,8 +96,11 @@ services:
       migrations:
         condition: service_completed_successfully
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
+      # The sql_readonly tool refuses to run without a dedicated role, so the same URL the
+      # migrations service provisioned is wired into the API here.
+      - DATABASE_READONLY_URL=${DATABASE_READONLY_URL:-postgresql+asyncpg://${POSTGRES_READONLY_USER:-agentkit_readonly}:${POSTGRES_READONLY_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
+      - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
       - RUN_TIMEOUT_S=${RUN_TIMEOUT_S:-60}
       # No default key. An unset or empty API_KEYS leaves the api service to fail at
