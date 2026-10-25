@@ -142,7 +142,9 @@ async def test_alternating_tools_do_not_trigger_detector() -> None:
         """Tool B."""
         return x * 2
 
-    # Alternate tool_a and tool_b with same args
+    # Alternate tools with distinct arguments. Alternating the *same* call is now a loop:
+    # the detector counts repeats inside a sliding window, not only consecutive ones
+    # (AUDIT-15), so each signature here must differ.
     llm = FakeLLMClient(
         responses=[
             LLMResponse(
@@ -151,11 +153,11 @@ async def test_alternating_tools_do_not_trigger_detector() -> None:
             ),
             LLMResponse(
                 text="B 1",
-                tool_calls=[ToolCall(id="c2", name="tool_b", arguments={"x": 1})],
+                tool_calls=[ToolCall(id="c2", name="tool_b", arguments={"x": 2})],
             ),
             LLMResponse(
                 text="A 2",
-                tool_calls=[ToolCall(id="c3", name="tool_a", arguments={"x": 1})],
+                tool_calls=[ToolCall(id="c3", name="tool_a", arguments={"x": 3})],
             ),
             LLMResponse(text="Done"),
         ]

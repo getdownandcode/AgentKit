@@ -43,7 +43,8 @@ class DuplicateToolCallLoopError(AgentKitError):
 
     def __init__(self, tool_name: str, count: int) -> None:
         super().__init__(
-            f"Detected duplicate tool call loop: '{tool_name}' called {count} consecutive times with identical arguments.",
+            f"Detected duplicate tool call loop: '{tool_name}' called {count} times with "
+            "identical arguments in a short window.",
             code="DUPLICATE_TOOL_CALL_LOOP",
         )
         self.tool_name = tool_name

@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+from collections import deque
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,7 +56,19 @@ class AgentConfig(BaseModel):
     max_consecutive_duplicate_tool_calls: int = Field(
         default=3,
         gt=0,
-        description="Halt run if identical tool calls are repeated consecutively.",
+        description=(
+            "Halt the run when the same tool call (name plus canonical arguments) occurs this "
+            "many times within the tool-call window. The name predates the sliding window; "
+            "repeats do not have to be adjacent."
+        ),
+    )
+    duplicate_tool_call_window: int = Field(
+        default=20,
+        gt=0,
+        description=(
+            "Number of most recent tool calls inspected for repeats. A window wider than the "
+            "repeat threshold catches alternating patterns such as A, B, A, B."
+        ),
     )
     system_prompt: str = Field(
         default=DEFAULT_SYSTEM_PROMPT,
@@ -287,8 +300,12 @@ class Agent:
             total_input_tokens = 0
             total_output_tokens = 0
             steps_count = 0
-            last_tool_signature: tuple[str, str] | None = None
-            consecutive_duplicate_count = 0
+            # Sliding window of recent call signatures. Remembering only the immediately
+            # preceding signature lets an alternating pattern (A, B, A, B, ...) reset the
+            # counter on every step, so the guard never fires and the run burns max_steps.
+            recent_tool_signatures: deque[tuple[str, str]] = deque(
+                maxlen=self.config.duplicate_tool_call_window
+            )
 
             try:
                 async with asyncio.timeout(self.config.run_timeout_s):
@@ -313,23 +330,21 @@ class Agent:
                             for call in response.tool_calls:
                                 args_json = json.dumps(call.arguments, sort_keys=True, default=str)
                                 sig = (call.name, args_json)
-                                if sig == last_tool_signature:
-                                    consecutive_duplicate_count += 1
-                                else:
-                                    last_tool_signature = sig
-                                    consecutive_duplicate_count = 1
+                                recent_tool_signatures.append(sig)
+                                repeat_count = sum(
+                                    1 for recent in recent_tool_signatures if recent == sig
+                                )
 
-                                if (
-                                    consecutive_duplicate_count
-                                    >= self.config.max_consecutive_duplicate_tool_calls
-                                ):
+                                if repeat_count >= self.config.max_consecutive_duplicate_tool_calls:
                                     duration_ms = max(
                                         0, int((time.perf_counter() - start_time) * 1000)
                                     )
                                     logger.warning(
-                                        "Detected duplicate tool call loop for '%s' (%d consecutive calls)",
+                                        "Detected duplicate tool call loop for '%s' (%d repeats "
+                                        "within %d calls)",
                                         call.name,
-                                        consecutive_duplicate_count,
+                                        repeat_count,
+                                        self.config.duplicate_tool_call_window,
                                     )
                                     res = RunResult(
                                         run_id=run_id,
@@ -338,7 +353,9 @@ class Agent:
                                         status=RunStatus.FAILED,
                                         failure_reason=(
                                             f"Detected duplicate tool call loop: '{call.name}' called "
-                                            f"{consecutive_duplicate_count} consecutive times with identical arguments: {call.arguments}"
+                                            f"{repeat_count} times with identical arguments within "
+                                            f"the last {self.config.duplicate_tool_call_window} "
+                                            f"tool calls: {call.arguments}"
                                         ),
                                         steps_count=steps_count,
                                         total_input_tokens=total_input_tokens,
@@ -347,9 +364,7 @@ class Agent:
                                     )
                                     await _finalize_and_return(res)
                                     if raise_on_failure:
-                                        raise DuplicateToolCallLoopError(
-                                            call.name, consecutive_duplicate_count
-                                        )
+                                        raise DuplicateToolCallLoopError(call.name, repeat_count)
                                     return res
 
                                 logger.info(

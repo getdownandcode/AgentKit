@@ -68,6 +68,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | stacked | 2 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
 | AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | stacked | 2 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
 | AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | stacked | 2 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
+| AUDIT-15/17 | AUDIT | Loop Detection and API Key Auth | `fix/agent-loop-and-auth` | stacked | 2 | Done | Sliding-window duplicate detector; hmac.compare_digest with normalised keys |
 
 ---
 
@@ -456,3 +457,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/provider-refusal-status`
 - **Commits**: 2
 - **Notes**: Generated tool schemas now carry Pydantic's `$defs` (plus `additionalProperties`, per-property titles and defaults) so every `$ref` resolves inside the emitted document; the redundant top-level `title` is dropped and simple built-in schemas stay byte-identical. The LLM provider client is built once per application on `app.state.managed_llm_client` and closed by the lifespan (`aio.aclose()` for Gemini, `close()` for OpenAI, forwarded through `RetryingLLMClient`), instead of one unclosed client per request; explicit `app.state.llm_client` overrides remain caller-owned. `TOOL_OUTPUT_MAX_CHARS` is wired into `AgentConfig` and the compose `api` service now forwards every setting documented in `.env.example` (`MAX_STEPS`, `TOOL_TIMEOUT_S`, `TOOL_OUTPUT_MAX_CHARS`, `SESSION_TTL_S`, `SESSION_MAX_MESSAGES`, `RATE_LIMIT_PER_MIN`, `SEARCH_API_KEY`, `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_DELAY_S`, `LLM_RETRY_MAX_DELAY_S`). Covered by `tests/unit/test_tools_resources_config.py`, including a check that every documented setting appears in compose. Recorded in ADR-016.
+
+### AUDIT-15 / AUDIT-17: Loop Detection and API Key Auth
+- **Status**: Done
+- **PR**: stacked on `fix/tools-resources-config`
+- **Commits**: 2
+- **Notes**: The duplicate-tool detector now counts `(tool, canonical-args)` occurrences inside a configurable sliding window (`duplicate_tool_call_window`, default 20) instead of remembering only the previous call, so alternating patterns such as `calculator(1)`, `calculator(2)`, `calculator(1)`, … abort the run in a few steps rather than at `max_steps`; the repeat threshold keeps its original field name and existing consecutive-repeat behaviour. API key verification strips the presented key the same way configured keys are and compares every configured key with `hmac.compare_digest` without short-circuiting, returning the normalised key used for rate limiting and logging. Covered by `tests/unit/test_loop_detector_and_auth.py`, and `tests/unit/test_agent_loop_detector.py` was updated where it encoded the old consecutive-only expectation. Recorded in ADR-017.

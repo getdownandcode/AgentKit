@@ -257,3 +257,18 @@ This log records significant architectural, technical, and design decisions made
   - N requests use one provider client and one connection pool, and shutdown releases it.
   - A construction failure is still deferred to the first request and surfaced as a 503, so a missing API key does not stop the process (or the test suite) from starting.
   - The retry wrapper remains the outermost layer, so it still wraps the shared client and forwards `aclose`.
+
+---
+
+## ADR-017: Bounded-Distance Loop Detection and Constant-Time Key Comparison
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: The duplicate-tool detector remembered only the immediately preceding call signature, so an alternating pattern (`A`, `B`, `A`, `B`, …) reset its counter on every step. The guard never fired and the run burned `max_steps` — each step costing tokens, latency and money — before the step limit stopped it. Separately, `verify_api_key` used `api_key not in settings.api_keys_list`: a short-circuiting membership test whose timing reveals how much of a key matched, and which compared the raw header against stripped configured keys, so a padded key behaved differently from an unpadded one while still being logged and rate-limited raw.
+- **Decision**:
+  - The detector keeps a `duplicate_tool_call_window` (default 20) of recent `(tool, canonical-args)` signatures and aborts when one signature reaches `max_consecutive_duplicate_tool_calls` occurrences inside that window. The field keeps its historic name; its description now states the sliding-window semantics.
+  - API keys are stripped on both sides and compared with `hmac.compare_digest` against every configured key without short-circuiting. The normalised key is what the dependency returns, so rate limiting and logs use the same value.
+- **Consequences**:
+  - Alternating loops are caught in a handful of steps instead of at the step limit, and the window bound is explicit and configurable.
+  - A very small window deliberately weakens detection; that is a documented, testable trade-off rather than an accident.
+  - Key comparison cost depends only on the number of configured keys, not on how many characters matched.
