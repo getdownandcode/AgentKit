@@ -21,6 +21,14 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/agentkit",
         description="Async PostgreSQL connection URL.",
     )
+    DATABASE_READONLY_URL: str | None = Field(
+        default=None,
+        description=(
+            "Async PostgreSQL URL for the dedicated non-superuser role used by the "
+            "sql_readonly tool. The application keeps using DATABASE_URL; the tool refuses "
+            "to run without this rather than falling back to the application role."
+        ),
+    )
     REDIS_URL: str = Field(
         default="redis://localhost:6379/0",
         description="Redis connection URL.",

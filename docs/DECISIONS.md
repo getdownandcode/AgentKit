@@ -178,3 +178,20 @@ This log records significant architectural, technical, and design decisions made
   - The fallback enforces the documented limit under concurrency, erring toward denial where it cannot decide.
   - Every provider fault is matchable on `LLMProviderError`, so HTTP status mapping stays correct for malformed as well as failed responses.
   - The unauthenticated health endpoint no longer discloses internal hostnames, ports or database names.
+
+---
+
+## ADR-012: Dedicated Read-Only Role Is the Primary SQL Isolation Control
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: `sql_readonly` connected with `Settings.DATABASE_URL`, the application's own superuser role, so the entire "read-only" guarantee rested on a keyword regex. That regex could be blinded by PostgreSQL quoting forms it did not understand: a dollar-quoted body (`$$'$$`) or an `E'\''` escape string hid quotes from the literal masker, and single-statement built-ins that read server files, execute dynamic SQL or mutate state (`pg_read_file`, `query_to_xml`, `setval`, `pg_terminate_backend`, `lo_import`, `dblink_exec`) never reached the keyword denylist at all. Separately, `LIMIT ALL` and any oversized `LIMIT` were treated as "already bounded" and passed through untouched, and the cap was only enforced by `fetchmany` on the client.
+- **Decision**:
+  - The tool connects with a dedicated, non-superuser role from `DATABASE_READONLY_URL`, provisioned by `scripts/init_readonly_role.py` with `CONNECT`, `USAGE` and `SELECT` only plus `default_transaction_read_only = on`. The application itself keeps using `DATABASE_URL`.
+  - A missing read-only URL fails closed (`ToolSecurityError`) rather than falling back to the application role; each session additionally runs `SET TRANSACTION READ ONLY` and, for the configured engine, refuses a superuser connection before executing the statement.
+  - Statement validation remains as defence in depth: the masker now understands dollar quotes and `E'...'` escapes, and a function-call denylist covers the side-effecting and file-reading built-ins.
+  - A trailing `LIMIT`/`FETCH FIRST` bound is clamped to the configured maximum (`LIMIT ALL`, `LIMIT NULL` and oversized counts included), smaller caller bounds are preserved, and the statement is wrapped only when a row-locking clause forbids appending `LIMIT`.
+- **Consequences**:
+  - Writing through the tool requires two independent failures, one of them a database privilege error; a validation gap alone is no longer enough.
+  - Deployments must provision the role (`python scripts/init_readonly_role.py`) or the SQL tool returns a structured failure. Compose does this in the migrations service.
+  - An injected engine (demo, tests) is explicitly caller-owned and still gets the read-only transaction, but not the superuser check.
