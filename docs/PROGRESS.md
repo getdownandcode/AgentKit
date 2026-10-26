@@ -61,16 +61,16 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUD-09  | AUD       | Live End-to-End Infrastructure Verification & Documentation Proof | `docs/e2e-verification-report` | #53 | 3 | Done | Standardized model, verified live stack, and documented in E2E_REPORT.md |
 | AUD-10  | AUD       | Rate Limiter Outage Fallback & Provider-Valid Session History | `fix/ratelimit-and-session-repair` | #56 | 3 | Done | In-memory fallback on Redis connection failures; synthetic tool results repair aborted sessions |
 | M13-T06 | M13       | Whole-Project Audit Remediation | `fix/audit-hardening` | #47 | 3 | Done | Fail-closed config and LLM resolution, SSRF post-connect check, atomic fallback |
-| AUDIT-01/02 | AUDIT | Read-Only SQL Isolation and Row Cap | `fix/sql-readonly-isolation` | stacked | 1 | Done | Dedicated non-superuser role, dollar-quote/E-string masking, built-in denylist, clamped server-side row cap |
-| AUDIT-18 | AUDIT | Compose Datastore Hardening | `chore/compose-hardening` | stacked | 1 | Done | Loopback-only datastore ports, required Postgres/Redis passwords, fail-closed credential guard |
-| AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | stacked | 1 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
-| AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | stacked | 1 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
-| AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | stacked | 1 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
-| AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | stacked | 1 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
-| AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | stacked | 1 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
-| AUDIT-15/17 | AUDIT | Loop Detection and API Key Auth | `fix/agent-loop-and-auth` | stacked | 1 | Done | Sliding-window duplicate detector; hmac.compare_digest with normalised keys |
-| AUDIT-16 | AUDIT | Documentation Claim Corrections | `docs/correct-audit-claims` | stacked | 1 | Done | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected and guarded by tests |
-| AUDIT-18-FU | AUDIT | Real-Infra Redis Authentication | `fix/real-infra-redis-auth` | stacked | 1 | Done | `REDIS_PASSWORD` completes a credential-less `REDIS_URL` for the app and the live suite; 18 fixture errors fixed |
+| AUDIT-01/02 | AUDIT | Read-Only SQL Isolation and Row Cap | `fix/sql-readonly-isolation` | #84 | 1 | Done | Dedicated non-superuser role, dollar-quote/E-string masking, built-in denylist, clamped server-side row cap |
+| AUDIT-18 | AUDIT | Compose Datastore Hardening | `chore/compose-hardening` | #84 | 1 | Done | Loopback-only datastore ports, required Postgres/Redis passwords, fail-closed credential guard |
+| AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | #84 | 1 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
+| AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | #84 | 1 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
+| AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | #84 | 1 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
+| AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | #84 | 1 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
+| AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | #84 | 1 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
+| AUDIT-15/17 | AUDIT | Loop Detection and API Key Auth | `fix/agent-loop-and-auth` | #84 | 1 | Done | Sliding-window duplicate detector; hmac.compare_digest with normalised keys |
+| AUDIT-16 | AUDIT | Documentation Claim Corrections | `docs/correct-audit-claims` | #84 | 1 | Done | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected and guarded by tests |
+| AUDIT-18-FU | AUDIT | Real-Infra Redis Authentication | `fix/real-infra-redis-auth` | #84 | 1 | Done | `REDIS_PASSWORD` completes a credential-less `REDIS_URL` for the app and the live suite; 18 fixture errors fixed |
 
 ---
 
@@ -426,54 +426,54 @@ This document tracks execution progress across all backlog tasks, including pull
 
 ### AUDIT-18: Compose Datastore Hardening
 - **Status**: Done
-- **PR**: stacked on `fix/sql-readonly-isolation`
+- **PR**: stacked on `fix/sql-readonly-isolation` — PR #84
 - **Commits**: 1
 - **Notes**: `docker-compose.yml` no longer publishes PostgreSQL or Redis with weak/no credentials. Both datastores bind loopback by default (`POSTGRES_BIND`/`REDIS_BIND`, `0.0.0.0` is a documented opt-in), `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD` and `REDIS_PASSWORD` are required by compose interpolation instead of defaulting to `postgres`/empty, Redis starts with `redis-server --requirepass` sourced from the environment and its healthcheck authenticates, and the api service's `REDIS_URL` carries the password. `scripts/check_deploy_credentials.py` runs ahead of migrations and fails closed on image defaults, documented placeholders, short passwords, a read-only role equal to the application role, a shared password, a missing `DATABASE_READONLY_URL` or a passwordless `REDIS_URL`. The migrations service also provisions the read-only role after seeding. Verified with `docker compose config` (required-variable failure), a live Redis container (`NOAUTH` unauthenticated, `PONG` authenticated, healthy) and the guard CLI. Documented in `docs/DEPLOY.md`.
 
 ### AUDIT-03 / AUDIT-08 / AUDIT-09: Persistence Integrity
 - **Status**: Done
-- **PR**: stacked on `chore/compose-hardening`
+- **PR**: stacked on `chore/compose-hardening` — PR #84
 - **Commits**: 1
 - **Notes**: Persistence is no longer best-effort. `Agent.run` logs and raises the new `PersistenceError` (HTTP 503, code `PERSISTENCE_ERROR`) when `create_run` fails, so the loop never executes for a run nobody can read back; a failed final `update_run` is retried once with `status=failed` so a transient fault cannot leave the row stuck in `running`. `POST /runs` no longer synthesises a 200 from the in-memory result when the store cannot return the record — it raises `PersistenceError`, and `GET /runs/{id}` still returns 404 for a run that was never persisted. `PostgresTraceSink` no longer fabricates a placeholder `Run` (`goal="Agent Execution"`, `session_id=None`, `status="running"`); it logs an error and drops the step when the parent row is missing, leaving `create_run` as the only writer of run rows. `session_id` is bounded at the request boundary (`max_length=255`, shared with the `String(255)` column through `SESSION_ID_MAX_LENGTH`), so an over-long id is a 422 before any agent work instead of a swallowed insert error. Covered by `tests/integration/test_persistence_integrity.py`, `tests/unit/test_pg_trace.py` and updated live-PostgreSQL tests in `tests/real/test_postgres_real.py`.
 
 ### AUDIT-04 / AUDIT-10 / AUDIT-11: Session History Durability
 - **Status**: Done
-- **PR**: stacked on `fix/persistence-integrity`
+- **PR**: stacked on `fix/persistence-integrity` — PR #84
 - **Commits**: 1
 - **Notes**: Gemini `thought_signature` is persisted as an explicitly tagged base64 object (`{"base64": "..."}`) and decoded by a `ToolCall` field validator, so arbitrary binary round-trips byte-for-byte instead of raising `UnicodeDecodeError` inside `model_dump(mode="json")` and aborting the whole save; legacy UTF-8-encoded signatures remain readable. A corrupt or unreadable history now raises the new `SessionHistoryError` (503) with an ERROR log carrying the session id, instead of being read as an empty conversation that the next run overwrote — the agent also marks the run failed rather than leaving it `running`. `SESSION_MAX_MESSAGES` (default 40) is wired through `get_memory_store`, documents in `.env.example`/`docs/SPEC.md`, and `RedisMemoryStore.truncate_messages` advances its cut point past leading tool results so the kept history is always provider-valid. Covered by `tests/unit/test_session_history.py` (binary round trips, tagged encoding, legacy read, corrupt payload, agent fail-closed behaviour, every truncation cut point, storage bound, settings wiring).
 
 ### AUDIT-05 / AUDIT-06: Gemini Wire-Format Fidelity
 - **Status**: Done
-- **PR**: stacked on `fix/session-history`
+- **PR**: stacked on `fix/session-history` — PR #84
 - **Commits**: 1
 - **Notes**: Consecutive `tool` messages are now grouped into one `Content(role="user")` with one `function_response` part per call, satisfying Gemini's requirement that the response turn match the call turn part-for-part; two parallel calls to the same tool are emitted in call order with matching ids. The provider's `FunctionCall.id` is preserved end to end instead of being replaced by a random UUID, `FunctionResponse.id` is populated, and the outbound `FunctionCall` carries the id too. Response parsing skips `Part.thought=True` parts, so internal reasoning no longer leaks into `LLMResponse.text`, the persisted assistant turn or `final_answer`, while a thought part that carries a function call still yields that call and its signature; the `raw_response.text` fallback is now only used when the response had no inspectable parts. Covered by `tests/unit/test_gemini_wire_format.py`. Recorded in ADR-014.
 
 ### AUDIT-07: Provider Refusal Status
 - **Status**: Done
-- **PR**: stacked on `fix/gemini-adapter`
+- **PR**: stacked on `fix/gemini-adapter` — PR #84
 - **Commits**: 1
 - **Notes**: `LLMResponse` gained `refusal_reason`, populated from Gemini's `prompt_feedback.block_reason` (with `block_reason_message` when present) and from candidate `finish_reason` values in {SAFETY, RECITATION, PROHIBITED_CONTENT, BLOCKLIST, SPII, IMAGE_SAFETY}, and from OpenAI's `finish_reason == "content_filter"` or a non-empty `message.refusal`. `RunStatus` gained `refused`; the agent now maps a refusal to that status with the provider's reason, and an empty completion (no text, no tool calls) to `failed` with an explicit "Provider returned an empty response" reason, so a `succeeded` run always carries a non-empty answer. The `raw_response.text` fallback is skipped for refusals, since it raises on blocked prompts and would otherwise re-add reasoning text. `POST /runs` surfaces the refusal status and reason. Covered by `tests/unit/test_provider_refusals.py`. Recorded in ADR-015.
 
 ### AUDIT-12 / AUDIT-13 / AUDIT-14: Tool Schemas, Client Lifecycle and Settings
 - **Status**: Done
-- **PR**: stacked on `fix/provider-refusal-status`
+- **PR**: stacked on `fix/provider-refusal-status` — PR #84
 - **Commits**: 1
 - **Notes**: Generated tool schemas now carry Pydantic's `$defs` (plus `additionalProperties`, per-property titles and defaults) so every `$ref` resolves inside the emitted document; the redundant top-level `title` is dropped and simple built-in schemas stay byte-identical. The LLM provider client is built once per application on `app.state.managed_llm_client` and closed by the lifespan (`aio.aclose()` for Gemini, `close()` for OpenAI, forwarded through `RetryingLLMClient`), instead of one unclosed client per request; explicit `app.state.llm_client` overrides remain caller-owned. `TOOL_OUTPUT_MAX_CHARS` is wired into `AgentConfig` and the compose `api` service now forwards every setting documented in `.env.example` (`MAX_STEPS`, `TOOL_TIMEOUT_S`, `TOOL_OUTPUT_MAX_CHARS`, `SESSION_TTL_S`, `SESSION_MAX_MESSAGES`, `RATE_LIMIT_PER_MIN`, `SEARCH_API_KEY`, `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_DELAY_S`, `LLM_RETRY_MAX_DELAY_S`). Covered by `tests/unit/test_tools_resources_config.py`, including a check that every documented setting appears in compose. Recorded in ADR-016.
 
 ### AUDIT-15 / AUDIT-17: Loop Detection and API Key Auth
 - **Status**: Done
-- **PR**: stacked on `fix/tools-resources-config`
+- **PR**: stacked on `fix/tools-resources-config` — PR #84
 - **Commits**: 1
 - **Notes**: The duplicate-tool detector now counts `(tool, canonical-args)` occurrences inside a configurable sliding window (`duplicate_tool_call_window`, default 20) instead of remembering only the previous call, so alternating patterns such as `calculator(1)`, `calculator(2)`, `calculator(1)`, … abort the run in a few steps rather than at `max_steps`; the repeat threshold keeps its original field name and existing consecutive-repeat behaviour. API key verification strips the presented key the same way configured keys are and compares every configured key with `hmac.compare_digest` without short-circuiting, returning the normalised key used for rate limiting and logging. Covered by `tests/unit/test_loop_detector_and_auth.py`, and `tests/unit/test_agent_loop_detector.py` was updated where it encoded the old consecutive-only expectation. Recorded in ADR-017.
 
 ### AUDIT-16: Documentation Claim Corrections
 - **Status**: Done
-- **PR**: stacked on `fix/agent-loop-and-auth`
+- **PR**: stacked on `fix/agent-loop-and-auth` — PR #84
 - **Commits**: 1
 - **Notes**: Corrected the claims the code did not support. `README.md` no longer describes `sql_readonly` as AST-validated and instead states the dedicated-role control and the lexer's actual limits. `docs/ARCHITECTURE.md` gained the real default model (`gemini-3.1-flash-lite`) and one-client-per-application note; its read-only SQL guardrail already describes the implemented role, session and row-cap controls. `docs/AUDIT.md` downgrades the SQL and Gemini component rows from an unqualified PASS to "PASS (after AUDIT-01/02)" / "PASS (after AUDIT-04/05/06)" and gains a remediation table indexed by issue number for all 18 findings. ADR-006 is annotated "superseded in part by ADR-008 and ADR-013" with inline corrections for the false base64 claim and the stale `gemini-2.0-flash` model id; the matching PROGRESS table row, its notes and `docs/PLAN.md` are aligned. `tests/unit/test_docs_accuracy.py` guards the default model name, the SQL wording, the ADR-006 annotation, the PASS qualifiers and the presence of all 18 findings in the remediation table.
 
 ### AUDIT-18-FU: Real-Infra Redis Authentication
 - **Status**: Done
-- **PR**: stacked on `docs/correct-audit-claims`
+- **PR**: stacked on `docs/correct-audit-claims` — PR #84
 - **Commits**: 1
 - **Notes**: The compose hardening in AUDIT-18 started Redis with `--requirepass`, but nothing outside compose consumed `REDIS_PASSWORD`, so the live tier broke: `tests/conftest.py` fell back to a credential-less `REDIS_TEST_URL`/`REDIS_URL` and every Redis fixture failed with `HELLO must be called with the client already authenticated` (18 errors). `REDIS_PASSWORD` is now a documented `Settings` field and is authoritative: `apply_redis_password` embeds it into a passwordless `redis://` or `rediss://` URL (percent-encoding reserved characters, leaving an explicit username/password, non-Redis URLs and malformed URLs untouched) and a `model_validator` applies it to `REDIS_URL`, so the API and the suite resolve the same authenticated URL and the secret need not be repeated in the URL string. The suite reads `REDIS_PASSWORD` from the environment first and falls back to `Settings`, which is how a password defined only in `.env` reaches pytest (pydantic-settings reads the file into the model, not into `os.environ`); an explicit `REDIS_TEST_URL` still wins, so CI is unchanged. Covered by `tests/unit/test_real_infra_urls.py`. Documented in `README.md` (test-tier commands) and `docs/DEPLOY.md` (credential resolution). Recorded in ADR-018.
