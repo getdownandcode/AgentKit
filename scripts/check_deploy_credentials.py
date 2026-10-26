@@ -121,6 +121,21 @@ def _password_in_url(url: str) -> str | None:
         return None
 
 
+def _resolve_redis_url(url: str, password: str | None) -> tuple[str, list[str]]:
+    """Complete a passwordless Redis URL, reporting a malformed value instead of raising.
+
+    ``apply_redis_password`` splits the URL with ``urlsplit``, which raises ``ValueError`` on a
+    malformed authority (``redis://[broken``). That call happens before ``_parse_url``, so an
+    unguarded value would abort the guard with a traceback instead of the actionable problem
+    line the rest of the audit produces. A failed split also means there is no URL to inspect,
+    so the caller must not additionally report a missing password.
+    """
+    try:
+        return apply_redis_password(url, password), []
+    except ValueError:
+        return "", ["REDIS_URL is not a valid connection URL."]
+
+
 def audit_credentials(env: Mapping[str, str]) -> list[str]:
     """Check the deployment's datastore credentials.
 
@@ -170,7 +185,8 @@ def audit_credentials(env: Mapping[str, str]) -> list[str]:
         or ""
     )
     raw_redis = (env.get("REDIS_URL") or "").strip()
-    redis_url = apply_redis_password(raw_redis, env.get("REDIS_PASSWORD"))
+    redis_url, redis_problems = _resolve_redis_url(raw_redis, env.get("REDIS_PASSWORD"))
+    problems.extend(redis_problems)
 
     app_role: str | None = None
     app_password: str | None = None
@@ -215,7 +231,10 @@ def audit_credentials(env: Mapping[str, str]) -> list[str]:
                 )
 
     if not redis_url:
-        problems.append("REDIS_URL has no password; Redis must not be reachable unauthenticated.")
+        if not redis_problems:
+            problems.append(
+                "REDIS_URL has no password; Redis must not be reachable unauthenticated."
+            )
     else:
         parsed_redis, parse_problems = _parse_url("REDIS_URL", redis_url)
         problems.extend(parse_problems)

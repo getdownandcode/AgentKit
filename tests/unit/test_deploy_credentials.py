@@ -162,6 +162,18 @@ def test_malformed_urls_are_reported_instead_of_raising(url: str) -> None:
     assert "DATABASE_URL is not a valid connection URL." in problems
 
 
+@pytest.mark.parametrize("url", ["redis://[broken", "redis://host:notaport/0"])
+def test_malformed_redis_url_is_reported_instead_of_raising(url: str) -> None:
+    """URL splitting happens before parsing, so it needs the same guard as the databases.
+
+    ``redis://[broken`` makes ``urlsplit`` raise ``ValueError`` while ``REDIS_PASSWORD`` is
+    being embedded. That used to abort the audit with a traceback before any problem line was
+    printed, which is the opposite of what a fail-closed deployment guard should do.
+    """
+    problems = audit_credentials(_env(REDIS_URL=url))
+    assert problems == ["REDIS_URL is not a valid connection URL."]
+
+
 def test_problem_messages_never_echo_the_secret() -> None:
     """The guard reports variable names, never the credential it rejected."""
     secret = "hunter2"
