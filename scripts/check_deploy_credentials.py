@@ -22,6 +22,7 @@ Exits 0 when every credential is set and specific, 1 otherwise (with one line pe
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from collections.abc import Mapping
@@ -35,6 +36,8 @@ from agentkit.config import (
     apply_redis_password,
     resolve_postgres_url,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Passwords that are the image defaults, the documented examples, or a bare service name.
 WEAK_PASSWORDS = frozenset(
@@ -232,15 +235,21 @@ def audit_credentials(env: Mapping[str, str]) -> list[str]:
 
 
 def main(env: Mapping[str, str] | None = None) -> int:
-    """Run the audit against the environment and report the result."""
+    """Run the audit against the environment and report the result.
+
+    Problems are logged at ``ERROR`` so the caller's logging setup decides where they go.
+    Importing this module has no side effects; the ``__main__`` block below installs the
+    stderr handler used by the compose ``migrations`` service.
+    """
     problems = audit_credentials(os.environ if env is None else env)
     if problems:
-        print("Refusing to continue: insecure deployment credentials.", file=sys.stderr)
+        logger.error("Refusing to continue: insecure deployment credentials.")
         for problem in problems:
-            print(f"  - {problem}", file=sys.stderr)
+            logger.error("  - %s", problem)
         return 1
     return 0
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     sys.exit(main())

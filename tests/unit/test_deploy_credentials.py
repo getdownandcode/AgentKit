@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -171,13 +172,21 @@ def test_problem_messages_never_echo_the_secret() -> None:
     assert all(secret not in problem for problem in problems)
 
 
-def test_main_reports_problems_on_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_logs_problems_and_exits_non_zero(caplog: pytest.LogCaptureFixture) -> None:
     """The guard exits non-zero and names each problem, so CI logs are actionable."""
-    exit_code = main(_env(POSTGRES_PASSWORD="postgres"))
-    captured = capsys.readouterr()
+    with caplog.at_level(logging.ERROR, logger="scripts.check_deploy_credentials"):
+        exit_code = main(_env(POSTGRES_PASSWORD="postgres"))
     assert exit_code == 1
-    assert "Refusing to continue" in captured.err
-    assert "POSTGRES_PASSWORD" in captured.err
+    assert "Refusing to continue" in caplog.text
+    assert "POSTGRES_PASSWORD" in caplog.text
+
+
+def test_no_print_calls_remain_in_the_guard() -> None:
+    """AGENTS.md forbids print(); deployment output goes through the logger."""
+    source = (Path(__file__).parents[2] / "scripts/check_deploy_credentials.py").read_text(
+        encoding="utf-8"
+    )
+    assert "print(" not in source
 
 
 def test_compose_binds_datastores_to_loopback_and_requires_passwords() -> None:
