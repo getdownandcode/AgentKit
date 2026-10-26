@@ -70,6 +70,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | stacked | 1 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
 | AUDIT-15/17 | AUDIT | Loop Detection and API Key Auth | `fix/agent-loop-and-auth` | stacked | 1 | Done | Sliding-window duplicate detector; hmac.compare_digest with normalised keys |
 | AUDIT-16 | AUDIT | Documentation Claim Corrections | `docs/correct-audit-claims` | stacked | 1 | Done | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected and guarded by tests |
+| AUDIT-18-FU | AUDIT | Real-Infra Redis Authentication | `fix/real-infra-redis-auth` | stacked | 1 | Done | `REDIS_PASSWORD` completes a credential-less `REDIS_URL` for the app and the live suite; 18 fixture errors fixed |
 
 ---
 
@@ -470,3 +471,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: stacked on `fix/agent-loop-and-auth`
 - **Commits**: 1
 - **Notes**: Corrected the claims the code did not support. `README.md` no longer describes `sql_readonly` as AST-validated and instead states the dedicated-role control and the lexer's actual limits. `docs/ARCHITECTURE.md` gained the real default model (`gemini-3.1-flash-lite`) and one-client-per-application note; its read-only SQL guardrail already describes the implemented role, session and row-cap controls. `docs/AUDIT.md` downgrades the SQL and Gemini component rows from an unqualified PASS to "PASS (after AUDIT-01/02)" / "PASS (after AUDIT-04/05/06)" and gains a remediation table indexed by issue number for all 18 findings. ADR-006 is annotated "superseded in part by ADR-008 and ADR-013" with inline corrections for the false base64 claim and the stale `gemini-2.0-flash` model id; the matching PROGRESS table row, its notes and `docs/PLAN.md` are aligned. `tests/unit/test_docs_accuracy.py` guards the default model name, the SQL wording, the ADR-006 annotation, the PASS qualifiers and the presence of all 18 findings in the remediation table.
+
+### AUDIT-18-FU: Real-Infra Redis Authentication
+- **Status**: Done
+- **PR**: stacked on `docs/correct-audit-claims`
+- **Commits**: 1
+- **Notes**: The compose hardening in AUDIT-18 started Redis with `--requirepass`, but nothing outside compose consumed `REDIS_PASSWORD`, so the live tier broke: `tests/conftest.py` fell back to a credential-less `REDIS_TEST_URL`/`REDIS_URL` and every Redis fixture failed with `HELLO must be called with the client already authenticated` (18 errors). `REDIS_PASSWORD` is now a documented `Settings` field and is authoritative: `apply_redis_password` embeds it into a passwordless `redis://` or `rediss://` URL (percent-encoding reserved characters, leaving an explicit username/password, non-Redis URLs and malformed URLs untouched) and a `model_validator` applies it to `REDIS_URL`, so the API and the suite resolve the same authenticated URL and the secret need not be repeated in the URL string. The suite reads `REDIS_PASSWORD` from the environment first and falls back to `Settings`, which is how a password defined only in `.env` reaches pytest (pydantic-settings reads the file into the model, not into `os.environ`); an explicit `REDIS_TEST_URL` still wins, so CI is unchanged. Covered by `tests/unit/test_real_infra_urls.py`. Documented in `README.md` (test-tier commands) and `docs/DEPLOY.md` (credential resolution). Recorded in ADR-018.

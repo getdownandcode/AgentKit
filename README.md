@@ -337,13 +337,15 @@ Redis, covering behaviour the hermetic tier structurally cannot assert:
 # Start the services the tier needs
 docker compose up -d postgres redis
 
-# Run only the real-infrastructure suite
+# Run only the real-infrastructure suite. REDIS_PASSWORD is completed into a
+# credential-less REDIS_TEST_URL, so a hardened (--requirepass) Redis authenticates.
 AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real
 
 # Or point it at any other PostgreSQL / Redis
 AGENTKIT_REAL_INFRA=1 \
   DATABASE_TEST_URL=postgresql+asyncpg://user:pass@localhost:5432/agentkit_test \
   REDIS_TEST_URL=redis://localhost:6379/15 \
+  REDIS_PASSWORD=their_password \
   pytest -m real_infra tests/real
 ```
 

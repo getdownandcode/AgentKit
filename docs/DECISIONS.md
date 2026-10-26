@@ -272,3 +272,19 @@ This log records significant architectural, technical, and design decisions made
   - Alternating loops are caught in a handful of steps instead of at the step limit, and the window bound is explicit and configurable.
   - A very small window deliberately weakens detection; that is a documented, testable trade-off rather than an accident.
   - Key comparison cost depends only on the number of configured keys, not on how many characters matched.
+
+---
+
+## ADR-018: `REDIS_PASSWORD` Completes a Credential-Less `REDIS_URL`
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**: The compose hardening in AUDIT-18 made Redis start with `redis-server --requirepass` and required `REDIS_PASSWORD`, but only `docker-compose.yml` interpolation consumed it. Nothing in Python read the variable, so two paths silently kept using an unauthenticated URL: `agentkit/api/main.py` built its client from `settings.REDIS_URL`, and `tests/conftest.py` resolved `REDIS_TEST_URL` → `REDIS_URL` → settings. Against the hardened stack the live tier failed at fixture setup with `HELLO must be called with the client already authenticated` (18 errors), and a deployment that set only `REDIS_PASSWORD` left the API unable to connect. Duplicating the secret inside `REDIS_URL` works but puts a credential into a string that ends up in logs, process listings and crash dumps.
+- **Decision**:
+  - `apply_redis_password(url, password)` in `agentkit/config.py` is the single rule: when a password is configured and the URL is `redis://`/`rediss://` with no userinfo of its own, the password is percent-encoded and embedded; an explicit username or password, a non-Redis URL and a URL without a host are returned unchanged.
+  - `Settings` gains `REDIS_PASSWORD` and completes `REDIS_URL` in a `model_validator`, so every consumer of `settings.REDIS_URL` authenticates without knowing about the separate variable.
+  - `tests/conftest.py::redis_test_url()` applies the same helper, resolving the password from `os.environ` first and then from `Settings` — `.env` values reach the model but not `os.environ`, and an explicit `REDIS_TEST_URL` still wins so CI keeps its own URL.
+- **Consequences**:
+  - One credential resolution for the API and the live suite; a password-only configuration works, and the secret can stay out of the URL.
+  - A URL that already carries credentials is never rewritten, so pointing at a passwordless local Redis or a differently-authenticated instance behaves exactly as before.
+  - `scripts/check_deploy_credentials.py` still requires a password to be *present* in `REDIS_URL`; keeping both set is the documented production shape, and the URL-level check stays the guard against an unauthenticated datastore.

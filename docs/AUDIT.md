@@ -89,3 +89,8 @@ A second whole-codebase audit filed 18 standalone findings as GitHub issues (`AU
 | AUDIT-16 Documentation asserts guarantees the code lacks | Medium | #73 | `docs/correct-audit-claims` | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected, ADRs 012–017 added |
 | AUDIT-17 API key comparison not constant-time | Low | #74 | `fix/agent-loop-and-auth` | `hmac.compare_digest` over normalised keys, no short-circuit |
 | AUDIT-18 Compose publishes datastores with weak credentials | Low/Deployment | #75 | `chore/compose-hardening` | Loopback binds, required passwords, Redis auth, fail-closed credential guard |
+
+Follow-up on the same stack: the hardened Redis required a password that nothing outside compose
+consumed, so the live tier failed at fixture setup (`HELLO must be called with the client already
+authenticated`, 18 errors). `REDIS_PASSWORD` now completes a credential-less `REDIS_URL` for the
+application and the suite (`fix/real-infra-redis-auth`, ADR-018).

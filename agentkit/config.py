@@ -2,9 +2,35 @@
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def apply_redis_password(url: str, password: str | None) -> str:
+    """Return ``url`` with ``password`` embedded when it carries no credentials.
+
+    The hardened compose stack requires ``REDIS_PASSWORD`` and starts Redis with
+    ``--requirepass``, but keeping the secret out of ``REDIS_URL`` is the safer way to
+    configure a deployment (a URL ends up in logs, process listings and crash dumps).
+    An explicit credential in the URL always wins, so pointing at a passwordless Redis
+    for local work still behaves exactly as before.
+    """
+    if not password:
+        return url
+
+    parts: SplitResult = urlsplit(url)
+    if parts.scheme not in {"redis", "rediss"}:
+        return url
+    # An existing userinfo (``redis://user@host``) or password must never be overridden.
+    if "@" in parts.netloc or parts.password:
+        return url
+    if not parts.netloc:
+        return url
+
+    userinfo = f":{quote(password, safe='')}"
+    return urlunsplit(parts._replace(netloc=f"{userinfo}@{parts.netloc}"))
 
 
 class Settings(BaseSettings):
@@ -32,6 +58,13 @@ class Settings(BaseSettings):
     REDIS_URL: str = Field(
         default="redis://localhost:6379/0",
         description="Redis connection URL.",
+    )
+    REDIS_PASSWORD: str | None = Field(
+        default=None,
+        description=(
+            "Password for Redis. Completed into REDIS_URL when the URL itself carries no "
+            "credentials, so the secret can stay out of the URL string."
+        ),
     )
 
     # LLM Settings
@@ -123,6 +156,16 @@ class Settings(BaseSettings):
         gt=0,
         description="Maximum characters allowed in tool outputs before truncation.",
     )
+
+    @model_validator(mode="after")
+    def _complete_redis_url(self) -> "Settings":
+        """Embed ``REDIS_PASSWORD`` into a credential-less ``REDIS_URL``.
+
+        Keeps a single source of truth for the resolved URL so the API and the
+        real-infrastructure test suite authenticate against the same hardened Redis.
+        """
+        self.REDIS_URL = apply_redis_password(self.REDIS_URL, self.REDIS_PASSWORD)
+        return self
 
     @field_validator("API_KEYS")
     @classmethod

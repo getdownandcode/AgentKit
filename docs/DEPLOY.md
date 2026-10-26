@@ -248,8 +248,13 @@ readable by anyone who can reach those ports.
   back to `postgres`/`postgres` or an unauthenticated Redis. Generate each one with
   `openssl rand -base64 24`.
 - **Redis authenticates.** The service starts with `redis-server --requirepass` sourced from
-  `REDIS_PASSWORD`, and `REDIS_URL` must carry the same password. The healthcheck authenticates
-  too, so a password mismatch surfaces as an unhealthy container rather than 401s at runtime.
+  `REDIS_PASSWORD`. `REDIS_PASSWORD` is authoritative: it is embedded into a `REDIS_URL` that
+  carries no credentials of its own, so the secret need not be repeated inside the URL, and an
+  explicit password in the URL still wins. The healthcheck authenticates too, so a password
+  mismatch surfaces as an unhealthy container rather than 401s at runtime. The
+  real-infrastructure suite resolves credentials the same way, which is why
+  `AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real` works against this stack without a
+  `REDIS_TEST_URL` — pass `REDIS_PASSWORD` (or let it come from `.env`) with any override URL.
 - **The guard fails closed.** The `migrations` service runs
   `python scripts/check_deploy_credentials.py` before anything else. It rejects the image
   defaults, the documented placeholders, short passwords, a missing read-only URL, a read-only
