@@ -66,7 +66,8 @@ Per the AgentKit specification and development rules:
 ## 4. Consolidated AUDIT-01…18 Remediation (2026-10-25)
 
 A second whole-codebase audit filed 18 standalone findings as GitHub issues (`AUDIT-01` …
-`AUDIT-18`). They were fixed as a linear stack of nine branches; this table is the index, and
+`AUDIT-18`). They were fixed as a linear 12-layer stack, merged as 14 commits (12 layer
+commits plus two progress-bookkeeping commits); this table is the index, and
 `docs/PROGRESS.md` records the per-layer detail.
 
 | Finding | Severity | Issue | Branch | Resolution |

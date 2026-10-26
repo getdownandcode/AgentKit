@@ -21,7 +21,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M4-T01  | M4        | Safe AST Calculator Tool | `feat/safe-calculator-tool` | #14 | 2 | Done | Strict AST arithmetic parser with zero eval/exec and DoS guards |
 | M4-T02  | M4        | Sandboxed File Reader Tool | `feat/sandboxed-file-reader-tool` | #15 | 2 | Done | FILE_TOOL_BASE_DIR sandboxing, path traversal & symlink defense |
 | M4-T03  | M4        | SSRF-Protected HTTP Fetch Tool | `feat/ssrf-http-fetch-tool` | #16 | 2 | Done | DNS & IP SSRF validation, private/metadata blocking, safe redirect |
-| M4-T04  | M4        | Read-Only SQL Tool | `feat/readonly-sql-tool` | #17 | 2 | Done | Strict SELECT AST validation, DDL/DML rejection, Markdown formatting |
+| M4-T04  | M4        | Read-Only SQL Tool | `feat/readonly-sql-tool` | #17 | 2 | Done | Single SELECT/WITH lexer validation (dedicated read-only role is the primary control), DDL/DML rejection, Markdown formatting |
 | M4-T05  | M4        | Web Search Tool Adapter | `feat/web-search-tool` | #18 | 2 | Done | Tavily search integration, error handling for missing key, formatted snippets |
 | M5-T01  | M5        | TraceSink Protocol & InMemoryTraceSink | `feat/trace-sink-base` | #19 | 2 | Done | StepTrace model, TraceSink ABC, InMemoryTraceSink, Agent.run() trace wiring |
 | M5-T02  | M5        | Contextual Structured JSON Logger | `feat/structured-logging` | #20 | 2 | Done | JSONFormatter, contextvars run_id/step_no propagation, Agent logging |
