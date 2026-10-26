@@ -71,6 +71,21 @@ def test_audit_table_records_the_sql_and_gemini_findings() -> None:
     assert "**PASS (after AUDIT-04/05/06)**" in audit
 
 
+def test_progress_no_longer_claims_ast_validation_for_sql() -> None:
+    """The historical M4 row must not contradict the corrected README."""
+    progress = _read("docs/PROGRESS.md")
+    row = next(line for line in progress.splitlines() if line.startswith("| M4-T04"))
+    assert "AST" not in row
+
+
+def test_audit_history_uses_the_canonical_stack_description() -> None:
+    """The merged stack is 12 layers / 14 commits; earlier counts had drifted."""
+    audit = _read("docs/AUDIT.md")
+    assert "12-layer stack" in audit
+    assert "14 commits" in audit
+    assert "nine branches" not in audit
+
+
 def test_every_audit_finding_appears_in_the_remediation_table() -> None:
     """A closed finding that is missing from the table is invisible to reviewers."""
     audit = _read("docs/AUDIT.md")

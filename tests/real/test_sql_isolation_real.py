@@ -39,12 +39,15 @@ def _readonly_url(admin_url: str) -> str:
 
 @pytest.fixture
 async def readonly_engine(real_database_url: str) -> AsyncIterator[AsyncEngine]:
-    """Provision the dedicated role and yield an engine connected as it."""
+    """Provision the dedicated role and yield an engine connected as it.
+
+    No provisioning failure is skipped here. ``real_database_url`` has already applied
+    migrations and fails with a clear message when PostgreSQL is unreachable, so anything
+    this call raises is a provisioning defect (or a role that cannot be restricted) and must
+    turn CI red rather than degrade the isolation tests to skips.
+    """
     url = _readonly_url(real_database_url)
-    try:
-        await provision_readonly_role(real_database_url, url)
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"Could not provision the read-only role: {exc}")
+    await provision_readonly_role(real_database_url, url)
 
     engine = create_async_engine(url, pool_pre_ping=True)
     try:

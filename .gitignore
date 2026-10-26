@@ -24,6 +24,11 @@ wheels/
 .installed.cfg
 *.egg
 
+# Dependency lockfiles
+# CI installs from pyproject.toml with pip (see .github/workflows/ci.yml); a uv lockfile is a
+# local convenience only and is not part of the reproducible build.
+uv.lock
+
 # Virtual environments
 .venv/
 venv/

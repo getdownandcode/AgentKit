@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,6 @@ def test_specific_credentials_pass() -> None:
         ("POSTGRES_PASSWORD", "postgres"),
         ("POSTGRES_PASSWORD", "change_me"),
         ("POSTGRES_READONLY_PASSWORD", "readonly"),
-        ("REDIS_PASSWORD", ""),
         ("REDIS_PASSWORD", "short"),
     ],
 )
@@ -83,7 +83,7 @@ def test_redis_url_without_password_is_reported() -> None:
     ``REDIS_URL`` may be credential-less as long as ``REDIS_PASSWORD`` supplies the
     password, so the failure case is having neither.
     """
-    problems = audit_credentials(_env(REDIS_URL="redis://redis:6379/0", REDIS_PASSWORD=None))
+    problems = audit_credentials(_env(REDIS_URL="redis://redis:6379/0", REDIS_PASSWORD=""))
     assert any("REDIS_URL has no password" in problem for problem in problems)
 
 
@@ -99,13 +99,106 @@ def test_redis_password_completes_a_credential_less_url() -> None:
     assert problems == []
 
 
-def test_main_reports_problems_on_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("password", ["postgres", "change_me_generate_with_openssl", "short"])
+def test_weak_password_in_explicit_app_url_is_rejected(password: str) -> None:
+    """A URL-supplied secret must pass the same policy as a component."""
+    problems = audit_credentials(
+        _env(DATABASE_URL=f"postgresql+asyncpg://agentkit:{password}@postgres:5432/agentkit")
+    )
+    assert any(problem.startswith("DATABASE_URL password") for problem in problems)
+
+
+@pytest.mark.parametrize("password", ["readonly", "change_me", "short"])
+def test_weak_password_in_explicit_readonly_url_is_rejected(password: str) -> None:
+    """The read-only credential is audited even when it is not a component."""
+    problems = audit_credentials(
+        _env(
+            DATABASE_READONLY_URL=(
+                f"postgresql+asyncpg://agentkit_readonly:{password}@postgres:5432/agentkit"
+            )
+        )
+    )
+    assert any(problem.startswith("DATABASE_READONLY_URL password") for problem in problems)
+
+
+def test_weak_password_in_explicit_redis_url_is_rejected() -> None:
+    """REDIS_PASSWORD does not override a URL secret, so the URL secret is audited."""
+    problems = audit_credentials(
+        _env(REDIS_URL="redis://:change_me@redis:6379/0", REDIS_PASSWORD="cache_password_4b18")
+    )
+    assert any(problem.startswith("REDIS_URL password") for problem in problems)
+
+
+def test_url_only_deployment_without_component_passwords_passes() -> None:
+    """An explicit URL is authoritative; unused component variables must not be demanded."""
+    problems = audit_credentials(
+        {
+            "DATABASE_URL": APP_URL,
+            "DATABASE_READONLY_URL": READONLY_URL,
+            "REDIS_URL": REDIS_URL,
+        }
+    )
+    assert problems == []
+
+
+def test_explicit_app_url_without_a_password_is_reported() -> None:
+    """A URL with a username but no password cannot be authenticated."""
+    problems = audit_credentials(
+        _env(DATABASE_URL="postgresql+asyncpg://agentkit@postgres:5432/agentkit")
+    )
+    assert "DATABASE_URL has no password." in problems
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "not a url",
+        "postgresql+asyncpg://agentkit:app_password_9f3a@postgres:notaport/agentkit",
+    ],
+)
+def test_malformed_urls_are_reported_instead_of_raising(url: str) -> None:
+    """A bad URL is a deployment problem, not a traceback in the migrations service."""
+    problems = audit_credentials(_env(DATABASE_URL=url))
+    assert "DATABASE_URL is not a valid connection URL." in problems
+
+
+@pytest.mark.parametrize("url", ["redis://[broken", "redis://host:notaport/0"])
+def test_malformed_redis_url_is_reported_instead_of_raising(url: str) -> None:
+    """URL splitting happens before parsing, so it needs the same guard as the databases.
+
+    ``redis://[broken`` makes ``urlsplit`` raise ``ValueError`` while ``REDIS_PASSWORD`` is
+    being embedded. That used to abort the audit with a traceback before any problem line was
+    printed, which is the opposite of what a fail-closed deployment guard should do.
+    """
+    problems = audit_credentials(_env(REDIS_URL=url))
+    assert problems == ["REDIS_URL is not a valid connection URL."]
+
+
+def test_problem_messages_never_echo_the_secret() -> None:
+    """The guard reports variable names, never the credential it rejected."""
+    secret = "hunter2"
+    problems = audit_credentials(
+        _env(DATABASE_URL=f"postgresql+asyncpg://agentkit:{secret}@postgres:5432/agentkit")
+    )
+    assert problems
+    assert all(secret not in problem for problem in problems)
+
+
+def test_main_logs_problems_and_exits_non_zero(caplog: pytest.LogCaptureFixture) -> None:
     """The guard exits non-zero and names each problem, so CI logs are actionable."""
-    exit_code = main(_env(POSTGRES_PASSWORD="postgres"))
-    captured = capsys.readouterr()
+    with caplog.at_level(logging.ERROR, logger="scripts.check_deploy_credentials"):
+        exit_code = main(_env(POSTGRES_PASSWORD="postgres"))
     assert exit_code == 1
-    assert "Refusing to continue" in captured.err
-    assert "POSTGRES_PASSWORD" in captured.err
+    assert "Refusing to continue" in caplog.text
+    assert "POSTGRES_PASSWORD" in caplog.text
+
+
+def test_no_print_calls_remain_in_the_guard() -> None:
+    """AGENTS.md forbids print(); deployment output goes through the logger."""
+    source = (Path(__file__).parents[2] / "scripts/check_deploy_credentials.py").read_text(
+        encoding="utf-8"
+    )
+    assert "print(" not in source
 
 
 def test_compose_binds_datastores_to_loopback_and_requires_passwords() -> None:

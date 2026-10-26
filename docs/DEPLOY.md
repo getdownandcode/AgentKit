@@ -268,9 +268,12 @@ readable by anyone who can reach those ports.
   `AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real` works against this stack without a
   `REDIS_TEST_URL` — pass `REDIS_PASSWORD` (or let it come from `.env`) with any override URL.
 - **The guard fails closed.** The `migrations` service runs
-  `python scripts/check_deploy_credentials.py` before anything else. It rejects the image
-  defaults, the documented placeholders, short passwords, a missing read-only URL, a read-only
-  role equal to the application role, and a `REDIS_URL` without a password.
+  `python scripts/check_deploy_credentials.py` before anything else. It audits the credentials
+  actually used, whether they come from components or from an explicit URL: it rejects the
+  image defaults, the documented placeholders, short passwords, a URL with no password, a
+  malformed URL, a missing read-only URL, a read-only role equal to the application role, and
+  a `REDIS_URL` without a password. A URL-only deployment is not required to repeat the
+  `*_PASSWORD` components it does not use.
 - **Read-only SQL role.** `python scripts/init_readonly_role.py` provisions
   `POSTGRES_READONLY_USER` with `CONNECT`/`USAGE`/`SELECT` only and
   `default_transaction_read_only = on`. The `sql_readonly` tool connects with it and refuses to
