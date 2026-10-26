@@ -23,6 +23,13 @@ from collections.abc import Mapping
 
 from sqlalchemy.engine import make_url
 
+from agentkit.config import (
+    DEFAULT_POSTGRES_USER,
+    DEFAULT_READONLY_USER,
+    apply_redis_password,
+    resolve_postgres_url,
+)
+
 #: Passwords that are the image defaults, the documented examples, or a bare service name.
 WEAK_PASSWORDS = frozenset(
     {
@@ -83,8 +90,29 @@ def audit_credentials(env: Mapping[str, str]) -> list[str]:
         if reason is not None:
             problems.append(f"{var} {reason}; generate one with `openssl rand -base64 24`.")
 
-    app_url = env.get("DATABASE_URL", "")
-    readonly_url = env.get("DATABASE_READONLY_URL", "")
+    # Resolved exactly the way Settings resolves them: an explicit URL wins, otherwise the
+    # URL is assembled from the POSTGRES_* components with the credentials escaped. Auditing
+    # the raw variables would either miss the component form or misread an escaped password.
+    app_url = (
+        resolve_postgres_url(
+            env,
+            url_var="DATABASE_URL",
+            user_var="POSTGRES_USER",
+            password_var="POSTGRES_PASSWORD",
+            default_user=DEFAULT_POSTGRES_USER,
+        )
+        or ""
+    )
+    readonly_url = (
+        resolve_postgres_url(
+            env,
+            url_var="DATABASE_READONLY_URL",
+            user_var="POSTGRES_READONLY_USER",
+            password_var="POSTGRES_READONLY_PASSWORD",
+            default_user=DEFAULT_READONLY_USER,
+        )
+        or ""
+    )
 
     app_role: str | None = None
     if app_url:
@@ -109,11 +137,12 @@ def audit_credentials(env: Mapping[str, str]) -> list[str]:
             )
     else:
         problems.append(
-            "DATABASE_READONLY_URL is not set; the sql_readonly tool would fail closed."
+            "DATABASE_READONLY_URL is not set; the sql_readonly tool would fail closed. Set "
+            "POSTGRES_READONLY_PASSWORD (or the URL) so the role can be provisioned."
         )
 
-    redis_url = env.get("REDIS_URL", "")
-    if redis_url and not make_url(redis_url).password:
+    redis_url = apply_redis_password(env.get("REDIS_URL", ""), env.get("REDIS_PASSWORD"))
+    if not redis_url or not make_url(redis_url).password:
         problems.append("REDIS_URL has no password; Redis must not be reachable unauthenticated.")
 
     return problems

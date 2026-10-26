@@ -69,16 +69,34 @@ def test_readonly_role_must_not_reuse_the_application_password() -> None:
     assert any("reuses the application password" in problem for problem in problems)
 
 
-def test_missing_readonly_url_is_reported() -> None:
-    """Without the read-only URL the SQL tool would fail closed at request time."""
-    problems = audit_credentials(_env(DATABASE_READONLY_URL=None))
+def test_missing_readonly_credentials_are_reported() -> None:
+    """Without a URL or the component password the SQL tool would fail closed."""
+    problems = audit_credentials(
+        _env(DATABASE_READONLY_URL=None, POSTGRES_READONLY_PASSWORD=None),
+    )
     assert any("DATABASE_READONLY_URL is not set" in problem for problem in problems)
 
 
 def test_redis_url_without_password_is_reported() -> None:
-    """An unauthenticated Redis exposes session history and rate-limit counters."""
-    problems = audit_credentials(_env(REDIS_URL="redis://redis:6379/0"))
+    """An unauthenticated Redis exposes session history and rate-limit counters.
+
+    ``REDIS_URL`` may be credential-less as long as ``REDIS_PASSWORD`` supplies the
+    password, so the failure case is having neither.
+    """
+    problems = audit_credentials(_env(REDIS_URL="redis://redis:6379/0", REDIS_PASSWORD=None))
     assert any("REDIS_URL has no password" in problem for problem in problems)
+
+
+def test_readonly_url_is_accepted_from_components_after_the_url_is_dropped() -> None:
+    """Dropping the URL but keeping POSTGRES_READONLY_PASSWORD is a valid configuration."""
+    problems = audit_credentials(_env(DATABASE_READONLY_URL=None))
+    assert problems == []
+
+
+def test_redis_password_completes_a_credential_less_url() -> None:
+    """The compose form (URL without credentials plus REDIS_PASSWORD) must pass the guard."""
+    problems = audit_credentials(_env(REDIS_URL="redis://redis:6379/0"))
+    assert problems == []
 
 
 def test_main_reports_problems_on_stderr(capsys: pytest.CaptureFixture[str]) -> None:

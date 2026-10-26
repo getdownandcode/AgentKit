@@ -288,3 +288,21 @@ This log records significant architectural, technical, and design decisions made
   - One credential resolution for the API and the live suite; a password-only configuration works, and the secret can stay out of the URL.
   - A URL that already carries credentials is never rewritten, so pointing at a passwordless local Redis or a differently-authenticated instance behaves exactly as before.
   - `scripts/check_deploy_credentials.py` still requires a password to be *present* in `REDIS_URL`; keeping both set is the documented production shape, and the URL-level check stays the guard against an unauthenticated datastore.
+
+---
+
+## ADR-019: Datastore Credentials Travel as Components, Never Inside a URL
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**: Compose synthesized `DATABASE_URL` and `DATABASE_READONLY_URL` by interpolating `${POSTGRES_PASSWORD}` and `${POSTGRES_READONLY_PASSWORD}` into a URL string. The documented generator is `openssl rand -base64 24`, whose output contains `/`, `+` and `=`; interpolation cannot escape them. `urllib.parse.urlsplit` and every RFC 3986 consumer end the authority at the first `/`, so the remainder of the password becomes the path and the connection targets a database named after the rest of the secret. SQLAlchemy's `make_url` is lenient about `/` but still truncates at `@`, which a password manager may emit. Docs, tests and the credential guard all needed the same rule, and duplicating it three times is how the URL forms drift apart.
+- **Decision**:
+  - Credentials are configured as components: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and the `POSTGRES_READONLY_USER`/`POSTGRES_READONLY_PASSWORD` pair for the tool role. `REDIS_PASSWORD` already worked this way (ADR-018).
+  - `build_postgres_url()` renders the URL through SQLAlchemy's `URL.create()`, which percent-encodes each component, and `resolve_postgres_url()` is the single precedence rule: an explicit `DATABASE_URL`/`DATABASE_READONLY_URL` wins verbatim, otherwise the components build the URL, otherwise the documented development default applies.
+  - `Settings` applies that rule in its `model_validator`, and `scripts/check_deploy_credentials.py` calls the same two functions, so the guard audits exactly the URLs the application will use.
+  - `docker-compose.yml` passes components only. The datastore host and port are fixed to the compose service names, so a host-side `.env` pointing at `localhost` cannot leak into a container. `REDIS_URL` is likewise credential-less and `REDIS_PASSWORD` supplies the secret.
+- **Consequences**:
+  - Any password a generator produces works unchanged, including `/`, `+`, `=`, `@` and `#`; nothing in the system has to avoid valid characters.
+  - A deployment that pins a full URL is unaffected, and the compose stack no longer depends on shell-style nested interpolation, which is easier to reason about and to render with `docker compose config`.
+  - The `.env.example` and README no longer teach a hand-built URL containing a password, so the unsafe pattern is not the first thing a new deployment copies.
+  - This supersedes the last consequence of ADR-018: the credential guard no longer demands a password inside `REDIS_URL`, because a credential-less URL plus `REDIS_PASSWORD` is the documented, tested form.

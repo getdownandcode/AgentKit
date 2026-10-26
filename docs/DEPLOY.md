@@ -198,16 +198,18 @@ REDIS_PASS=$(aws ssm get-parameter --name "/agentkit/production/REDIS_PASSWORD" 
 API_KEYS=$(aws ssm get-parameter --name "/agentkit/production/API_KEYS" --with-decryption --query "Parameter.Value" --output text)
 GEMINI_KEY=$(aws ssm get-parameter --name "/agentkit/production/GEMINI_API_KEY" --with-decryption --query "Parameter.Value" --output text)
 
+# Credentials are written as components, not inside connection URLs: the generated
+# passwords contain '/', '+' and '=', and AgentKit escapes them while it builds the URL.
 cat << ENVFILE > /opt/agentkit/.env
-DATABASE_URL=postgresql+asyncpg://agentkit:${DB_PASS}@postgres:5432/agentkit
-DATABASE_READONLY_URL=postgresql+asyncpg://agentkit_readonly:${RO_PASS}@postgres:5432/agentkit
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
 POSTGRES_USER=agentkit
 POSTGRES_PASSWORD=${DB_PASS}
 POSTGRES_READONLY_USER=agentkit_readonly
 POSTGRES_READONLY_PASSWORD=${RO_PASS}
 POSTGRES_DB=agentkit
 REDIS_PASSWORD=${REDIS_PASS}
-REDIS_URL=redis://:${REDIS_PASS}@redis:6379/0
+REDIS_URL=redis://redis:6379/0
 LLM_PROVIDER=gemini
 LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=${GEMINI_KEY}
@@ -247,11 +249,21 @@ readable by anyone who can reach those ports.
   and `REDIS_PASSWORD`; interpolation fails when one is missing instead of silently falling
   back to `postgres`/`postgres` or an unauthenticated Redis. Generate each one with
   `openssl rand -base64 24`.
+- **Credentials are never interpolated into a URL.** Compose passes `POSTGRES_HOST`,
+  `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and the
+  `POSTGRES_READONLY_*` pair; `Settings` assembles `DATABASE_URL` and `DATABASE_READONLY_URL`
+  from them and percent-encodes every component. This matters because
+  `openssl rand -base64 24` produces `/`, `+` and `=`: a raw `/` ends the URL authority, so the
+  remainder of the password becomes the path and the connection resolves to a database that
+  does not exist. An explicitly configured `DATABASE_URL` / `DATABASE_READONLY_URL` still
+  wins, for a managed database behind a secret substitution. Inside the stack the service
+  names are authoritative, so a host-side `.env` pointing at `localhost` cannot leak into a
+  container.
 - **Redis authenticates.** The service starts with `redis-server --requirepass` sourced from
-  `REDIS_PASSWORD`. `REDIS_PASSWORD` is authoritative: it is embedded into a `REDIS_URL` that
-  carries no credentials of its own, so the secret need not be repeated inside the URL, and an
-  explicit password in the URL still wins. The healthcheck authenticates too, so a password
-  mismatch surfaces as an unhealthy container rather than 401s at runtime. The
+  `REDIS_PASSWORD`. `REDIS_PASSWORD` is authoritative: it is embedded (percent-encoded) into a
+  `REDIS_URL` that carries no credentials of its own, so the secret need not be repeated inside
+  the URL, and an explicit password in the URL still wins. The healthcheck authenticates too,
+  so a password mismatch surfaces as an unhealthy container rather than 401s at runtime. The
   real-infrastructure suite resolves credentials the same way, which is why
   `AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real` works against this stack without a
   `REDIS_TEST_URL` — pass `REDIS_PASSWORD` (or let it come from `.env`) with any override URL.
@@ -267,8 +279,11 @@ readable by anyone who can reach those ports.
 Verify the effective configuration before starting the stack:
 
 ```bash
-docker compose config | grep -E "POSTGRES_BIND|REDIS_BIND|requirepass|DATABASE_READONLY_URL"
+docker compose config | grep -E "POSTGRES_BIND|REDIS_BIND|requirepass|POSTGRES_READONLY_USER|REDIS_URL"
 ```
+
+No credential appears inside a URL in that output: the datastore URLs are built by the
+application from the component variables.
 
 ---
 

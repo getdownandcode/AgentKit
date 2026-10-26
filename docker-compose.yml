@@ -68,14 +68,22 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
-      - DATABASE_READONLY_URL=${DATABASE_READONLY_URL:-postgresql+asyncpg://${POSTGRES_READONLY_USER:-agentkit_readonly}:${POSTGRES_READONLY_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
+      # Credentials travel as components, never pasted into a URL. A password from
+      # `openssl rand -base64 24` contains '/', '+' and '=', and a raw '/' ends the URL
+      # authority: the rest of the password becomes the path and the connection targets a
+      # database nobody created. Settings and the guard escape each component themselves,
+      # so any generated password works.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-agentkit}
+      - POSTGRES_READONLY_USER=${POSTGRES_READONLY_USER:-agentkit_readonly}
+      - POSTGRES_READONLY_PASSWORD=${POSTGRES_READONLY_PASSWORD:?POSTGRES_READONLY_PASSWORD must be set for the dedicated read-only role}
       # Settings validation requires API_KEYS, and both alembic and the seed script
       # construct Settings. Passed through so the compose stack fails closed here,
       # with the same validation error, rather than in the api service.
       - API_KEYS=${API_KEYS:-}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_READONLY_PASSWORD=${POSTGRES_READONLY_PASSWORD:?POSTGRES_READONLY_PASSWORD must be set for the dedicated read-only role}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     networks:
       - agentkit-net
@@ -96,11 +104,21 @@ services:
       migrations:
         condition: service_completed_successfully
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
-      # The sql_readonly tool refuses to run without a dedicated role, so the same URL the
-      # migrations service provisioned is wired into the API here.
-      - DATABASE_READONLY_URL=${DATABASE_READONLY_URL:-postgresql+asyncpg://${POSTGRES_READONLY_USER:-agentkit_readonly}:${POSTGRES_READONLY_PASSWORD}@postgres:5432/${POSTGRES_DB:-agentkit}}
-      - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      # Same component form as the migrations service; see the comment there. Inside the
+      # stack the service names are authoritative, so a .env DATABASE_URL pointing at
+      # localhost cannot leak in and break the container.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-agentkit}
+      # The sql_readonly tool refuses to run without a dedicated role, so the same
+      # credentials the migrations service provisioned are wired into the API here.
+      - POSTGRES_READONLY_USER=${POSTGRES_READONLY_USER:-agentkit_readonly}
+      - POSTGRES_READONLY_PASSWORD=${POSTGRES_READONLY_PASSWORD}
+      # Credential-less URL plus the password: Settings escapes the secret into the URL.
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
       # Every setting documented in .env.example is forwarded, so a containerised deployment
       # does not silently run with defaults that differ from the documented ones.

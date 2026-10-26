@@ -106,8 +106,17 @@ LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENAI_API_KEY=your_openai_api_key_here
 
-# Persistence
-DATABASE_URL=postgresql+asyncpg://agentkit:agentkit_password@localhost:5432/agentkit
+# Persistence. Credentials are components, not parts of a URL: AgentKit escapes them
+# while it builds DATABASE_URL / DATABASE_READONLY_URL, so a password may contain
+# '/', '+' or '=' (as `openssl rand -base64 24` output does).
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=agentkit
+POSTGRES_PASSWORD=agentkit_password
+POSTGRES_DB=agentkit
+POSTGRES_READONLY_USER=agentkit_readonly
+POSTGRES_READONLY_PASSWORD=agentkit_readonly_password
+REDIS_PASSWORD=redis_password
 REDIS_URL=redis://localhost:6379/0
 
 # Security (API_KEYS is required; the app refuses to start without it)

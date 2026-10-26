@@ -94,3 +94,12 @@ Follow-up on the same stack: the hardened Redis required a password that nothing
 consumed, so the live tier failed at fixture setup (`HELLO must be called with the client already
 authenticated`, 18 errors). `REDIS_PASSWORD` now completes a credential-less `REDIS_URL` for the
 application and the suite (`fix/real-infra-redis-auth`, ADR-018).
+
+### Review follow-ups on PR #84 (AUDIT-19, AUDIT-20)
+
+The pull request was reviewed automatically after the first push; two findings were valid and are
+fixed on top of the same stack rather than in a separate follow-up.
+
+| Finding | Severity | Branch | Resolution |
+|:---|:---:|:---|:---|
+| AUDIT-19 Datastore credentials interpolated into URLs | High/Deployment | `fix/pg-url-credentials` | Credentials configured as components and percent-encoded by `URL.create()`; an explicit URL still wins |
