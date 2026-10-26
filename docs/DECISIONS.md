@@ -78,14 +78,14 @@ This log records significant architectural, technical, and design decisions made
 ## ADR-006: Gemini 2.x/3.x Thought Signature Preservation and Active Model Standard
 
 - **Date**: 2026-10-01
-- **Status**: Accepted
+- **Status**: Accepted; superseded in part by ADR-008 (function-response role) and ADR-013 (signature encoding). Two claims below were inaccurate when written and are corrected inline — see the notes on the serialization and model bullets.
 - **Context**: Newer Gemini reasoning models (e.g. Gemini 2.x and 3.x) employ internal reasoning/thinking steps before invoking tools. The Google GenAI API emits an opaque `thought_signature` on candidate `Part` objects containing `function_call`. When returning subsequent conversation turns with `function_response` parts, the API strictly enforces that the prior assistant turn echoes back the exact `thought_signature`. Omitting this signature produces `400 INVALID_ARGUMENT — Function call is missing a thought_signature in functionCall parts`. Additionally, older model identifiers like `gemini-2.5-flash` returned `404 NOT_FOUND` for new users, and `Role.TOOL` messages in the Gemini adapter previously used `role="user"` instead of the official `role="tool"` and mapped tool calls by arbitrary UUID IDs rather than declared function names.
 - **Decision**:
   - Update `ToolCall` neutral model to include an optional `thought_signature: bytes | None = None` field.
   - In `GeminiClient`, extract and preserve `thought_signature` from candidate parts and forward it in subsequent assistant tool calls using `types.Part(function_call=..., thought_signature=...)`.
   - In `GeminiClient`, resolve `Role.TOOL` message identifiers to declared function names via assistant history, and use `types.Content(role="tool", parts=[...])` adhering to official Google GenAI SDK standards.
-  - Update `RedisMemoryStore` to serialize messages via `m.model_dump(mode="json")` so raw bytes fields are transparently base64-encoded and decoded across session persistence.
-  - Standardize the active default Gemini model to `gemini-2.0-flash` across application settings, factory, documentation, `.env.example`, and `docker-compose.yml`.
+  - Persist messages with an explicit encoding for binary fields. **Correction:** this ADR originally claimed that `m.model_dump(mode="json")` base64-encodes `bytes` transparently. It does not: Pydantic's default `ser_json_bytes="utf8"` decodes them as UTF-8 and raises on any non-UTF-8 signature, which aborted the whole save. Superseded by ADR-013, which tags and base64-encodes the signature at the persistence boundary and decodes it in a `ToolCall` validator.
+  - Standardize the active default Gemini model across application settings, factory, documentation, `.env.example`, and `docker-compose.yml`. **Correction:** this ADR originally named `gemini-2.0-flash`; the active default is `gemini-3.1-flash-lite` (`Settings.LLM_MODEL`, `create_llm_client`, `GeminiClient`).
 - **Consequences**:
   - Full compatibility with active and future reasoning-capable Gemini models.
   - Clean multi-turn tool calling without 400 or 404 errors.
@@ -178,3 +178,148 @@ This log records significant architectural, technical, and design decisions made
   - The fallback enforces the documented limit under concurrency, erring toward denial where it cannot decide.
   - Every provider fault is matchable on `LLMProviderError`, so HTTP status mapping stays correct for malformed as well as failed responses.
   - The unauthenticated health endpoint no longer discloses internal hostnames, ports or database names.
+
+---
+
+## ADR-012: Dedicated Read-Only Role Is the Primary SQL Isolation Control
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: `sql_readonly` connected with `Settings.DATABASE_URL`, the application's own superuser role, so the entire "read-only" guarantee rested on a keyword regex. That regex could be blinded by PostgreSQL quoting forms it did not understand: a dollar-quoted body (`$$'$$`) or an `E'\''` escape string hid quotes from the literal masker, and single-statement built-ins that read server files, execute dynamic SQL or mutate state (`pg_read_file`, `query_to_xml`, `setval`, `pg_terminate_backend`, `lo_import`, `dblink_exec`) never reached the keyword denylist at all. Separately, `LIMIT ALL` and any oversized `LIMIT` were treated as "already bounded" and passed through untouched, and the cap was only enforced by `fetchmany` on the client.
+- **Decision**:
+  - The tool connects with a dedicated, non-superuser role from `DATABASE_READONLY_URL`, provisioned by `scripts/init_readonly_role.py` with `CONNECT`, `USAGE` and `SELECT` only plus `default_transaction_read_only = on`. The application itself keeps using `DATABASE_URL`.
+  - A missing read-only URL fails closed (`ToolSecurityError`) rather than falling back to the application role; each session additionally runs `SET TRANSACTION READ ONLY` and, for the configured engine, refuses a superuser connection before executing the statement.
+  - Statement validation remains as defence in depth: the masker now understands dollar quotes and `E'...'` escapes, and a function-call denylist covers the side-effecting and file-reading built-ins.
+  - A trailing `LIMIT`/`FETCH FIRST` bound is clamped to the configured maximum (`LIMIT ALL`, `LIMIT NULL` and oversized counts included), smaller caller bounds are preserved, and the statement is wrapped only when a row-locking clause forbids appending `LIMIT`.
+- **Consequences**:
+  - Writing through the tool requires two independent failures, one of them a database privilege error; a validation gap alone is no longer enough.
+  - Deployments must provision the role (`python scripts/init_readonly_role.py`) or the SQL tool returns a structured failure. Compose does this in the migrations service.
+  - An injected engine (demo, tests) is explicitly caller-owned and still gets the read-only transaction, but not the superuser check.
+
+---
+
+## ADR-013: Session History Is Durable, Bounded and Read Fail-Closed
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: Session persistence had three independent failure modes. `RedisMemoryStore.save_messages` serialized with `model_dump(mode="json")`, and Pydantic's default `ser_json_bytes="utf8"` raises `UnicodeDecodeError` on any non-UTF-8 Gemini `thought_signature` — so one signature aborted the write of the *entire* conversation. `get_messages` turned any deserialization error into `[]`, which made a corrupt history indistinguishable from a new conversation and let the next run overwrite it with the truncated one. And `truncate_messages` was never wired to a setting (histories grew without bound), while the naive tail cut it implemented could start the history on a `tool` message whose assistant `tool_calls` turn had been dropped, a shape providers reject.
+- **Decision**:
+  - Binary signatures are persisted with an explicit tagged base64 object (`{"base64": "..."}`), encoded in the store and decoded by a `ToolCall` field validator. Bare strings are still decoded as the legacy raw UTF-8 form so old histories remain readable.
+  - A corrupt or unreadable history raises `SessionHistoryError` (503) instead of returning `[]`. `Agent.run` logs it with the session id, marks the run failed and never calls `save_messages`.
+  - `SESSION_MAX_MESSAGES` (default 40) bounds the retained history and is wired through `get_memory_store`. Truncation advances the cut point past leading tool results, so the kept history is always provider-valid.
+- **Consequences**:
+  - A conversation can no longer be silently replaced by a context-free one after a decode error or a Redis blip; the caller gets a 503 it can retry.
+  - Sessions are bounded in Redis, and the bound is enforced at the only writer.
+  - A stored history written by an older version stays readable, at the cost of an explicit legacy branch in the validator.
+
+---
+
+## ADR-014: Gemini Adapter Preserves Provider Call Ids and Excludes Thought Parts
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: The adapter emitted one `Content(role="user")` per tool result. Gemini validates that a turn answering a function-call turn carries the same number of `function_response` parts as the call turn had `function_call` parts, so every parallel tool call failed with `400 INVALID_ARGUMENT`. The provider's `FunctionCall.id` was discarded in favour of a fresh UUID and `FunctionResponse.id` was never set, so two parallel calls to the *same* tool could not be correlated at all. Separately, response parsing never inspected `Part.thought`, so internal reasoning text was concatenated into the answer, the persisted assistant turn and the API's `final_answer`; the `raw_response.text` fallback reintroduced it even after parts were filtered.
+- **Decision**:
+  - Consecutive `tool` messages are grouped into a single `Content(role="user")` with one `function_response` part per call, each carrying the id of the call it answers.
+  - The provider's `FunctionCall.id` is preserved end to end (a fresh UUID remains the fallback when the provider omits it), and is forwarded on the outbound `FunctionCall`.
+  - Parts with `thought=True` are excluded from the answer text but still yield their function call and thought signature. The `raw_response.text` fallback is used only when the response carried no inspectable parts.
+- **Consequences**:
+  - Parallel tool calls work against Gemini, and identical parallel calls can be matched to their results in call order.
+  - Internal reasoning never reaches the client through `final_answer` or stored history.
+
+---
+
+## ADR-015: Provider Refusals Are a Distinct Terminal Status
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: Neither adapter inspected the provider's own verdict. Gemini reports a blocked prompt through `prompt_feedback.block_reason` and a stopped generation through `candidate.finish_reason` (`SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`); OpenAI reports `finish_reason == "content_filter"` or a populated `message.refusal`. All of these arrive as an ordinary 200 response with no content and no tool calls, and the agent only branched on "are there tool calls?", so each was returned as `SUCCEEDED` with an empty `final_answer`.
+- **Decision**:
+  - `LLMResponse` carries an optional `refusal_reason`, populated by each adapter from the provider's block/refusal signals.
+  - `RunStatus` gains `refused`. The agent maps a refusal to that status with the provider's reason, and maps an empty completion (no text, no tool calls) to `failed` with an explicit "empty provider response" reason.
+  - A `SUCCEEDED` run always has a non-empty `final_answer`; the assistant turn is only appended to history when there is text.
+- **Consequences**:
+  - Operator dashboards and clients can distinguish "the model declined" from "the system broke" and from a genuine empty answer.
+  - The refusal reason is client-visible in `failure_reason`, which is safe: it is the provider's category, not prompt content.
+
+---
+
+## ADR-016: One Application-Owned Provider Client, Closed on Shutdown
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: `get_llm_client` called `create_llm_client_from_settings` on every request. Each `AsyncOpenAI` / `genai.Client` owns its own HTTP transport and connection pool, and nothing closed them: the lifespan only disposed of Redis and the database engine. Long-running processes leaked sockets and file descriptors and never pooled provider connections. Closing is adapter-specific — `genai.Client.close()` does not close the async transport used by `client.aio`, which needs `client.aio.aclose()`.
+- **Decision**:
+  - `LLMClient` gains a concrete `aclose()` that defaults to a no-op; both provider adapters override it (Gemini prefers `aio.aclose()`, OpenAI awaits `close()`) and `RetryingLLMClient` delegates to the client it wraps.
+  - `get_llm_client` builds the provider once and stores it on `app.state.managed_llm_client`; the lifespan closes it before releasing Redis and the database engine.
+  - An explicit `app.state.llm_client` override still wins and stays caller-owned: tests and embedders that inject a client are responsible for its lifetime.
+- **Consequences**:
+  - N requests use one provider client and one connection pool, and shutdown releases it.
+  - A construction failure is still deferred to the first request and surfaced as a 503, so a missing API key does not stop the process (or the test suite) from starting.
+  - The retry wrapper remains the outermost layer, so it still wraps the shared client and forwards `aclose`.
+
+---
+
+## ADR-017: Bounded-Distance Loop Detection and Constant-Time Key Comparison
+
+- **Date**: 2026-10-25
+- **Status**: Accepted
+- **Context**: The duplicate-tool detector remembered only the immediately preceding call signature, so an alternating pattern (`A`, `B`, `A`, `B`, …) reset its counter on every step. The guard never fired and the run burned `max_steps` — each step costing tokens, latency and money — before the step limit stopped it. Separately, `verify_api_key` used `api_key not in settings.api_keys_list`: a short-circuiting membership test whose timing reveals how much of a key matched, and which compared the raw header against stripped configured keys, so a padded key behaved differently from an unpadded one while still being logged and rate-limited raw.
+- **Decision**:
+  - The detector keeps a `duplicate_tool_call_window` (default 20) of recent `(tool, canonical-args)` signatures and aborts when one signature reaches `max_consecutive_duplicate_tool_calls` occurrences inside that window. The field keeps its historic name; its description now states the sliding-window semantics.
+  - API keys are stripped on both sides and compared with `hmac.compare_digest` against every configured key without short-circuiting. The normalised key is what the dependency returns, so rate limiting and logs use the same value.
+- **Consequences**:
+  - Alternating loops are caught in a handful of steps instead of at the step limit, and the window bound is explicit and configurable.
+  - A very small window deliberately weakens detection; that is a documented, testable trade-off rather than an accident.
+  - Key comparison cost depends only on the number of configured keys, not on how many characters matched.
+
+---
+
+## ADR-018: `REDIS_PASSWORD` Completes a Credential-Less `REDIS_URL`
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**: The compose hardening in AUDIT-18 made Redis start with `redis-server --requirepass` and required `REDIS_PASSWORD`, but only `docker-compose.yml` interpolation consumed it. Nothing in Python read the variable, so two paths silently kept using an unauthenticated URL: `agentkit/api/main.py` built its client from `settings.REDIS_URL`, and `tests/conftest.py` resolved `REDIS_TEST_URL` → `REDIS_URL` → settings. Against the hardened stack the live tier failed at fixture setup with `HELLO must be called with the client already authenticated` (18 errors), and a deployment that set only `REDIS_PASSWORD` left the API unable to connect. Duplicating the secret inside `REDIS_URL` works but puts a credential into a string that ends up in logs, process listings and crash dumps.
+- **Decision**:
+  - `apply_redis_password(url, password)` in `agentkit/config.py` is the single rule: when a password is configured and the URL is `redis://`/`rediss://` with no userinfo of its own, the password is percent-encoded and embedded; an explicit username or password, a non-Redis URL and a URL without a host are returned unchanged.
+  - `Settings` gains `REDIS_PASSWORD` and completes `REDIS_URL` in a `model_validator`, so every consumer of `settings.REDIS_URL` authenticates without knowing about the separate variable.
+  - `tests/conftest.py::redis_test_url()` applies the same helper, resolving the password from `os.environ` first and then from `Settings` — `.env` values reach the model but not `os.environ`, and an explicit `REDIS_TEST_URL` still wins so CI keeps its own URL.
+- **Consequences**:
+  - One credential resolution for the API and the live suite; a password-only configuration works, and the secret can stay out of the URL.
+  - A URL that already carries credentials is never rewritten, so pointing at a passwordless local Redis or a differently-authenticated instance behaves exactly as before.
+  - `scripts/check_deploy_credentials.py` still requires a password to be *present* in `REDIS_URL`; keeping both set is the documented production shape, and the URL-level check stays the guard against an unauthenticated datastore.
+
+---
+
+## ADR-019: Datastore Credentials Travel as Components, Never Inside a URL
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**: Compose synthesized `DATABASE_URL` and `DATABASE_READONLY_URL` by interpolating `${POSTGRES_PASSWORD}` and `${POSTGRES_READONLY_PASSWORD}` into a URL string. The documented generator is `openssl rand -base64 24`, whose output contains `/`, `+` and `=`; interpolation cannot escape them. `urllib.parse.urlsplit` and every RFC 3986 consumer end the authority at the first `/`, so the remainder of the password becomes the path and the connection targets a database named after the rest of the secret. SQLAlchemy's `make_url` is lenient about `/` but still truncates at `@`, which a password manager may emit. Docs, tests and the credential guard all needed the same rule, and duplicating it three times is how the URL forms drift apart.
+- **Decision**:
+  - Credentials are configured as components: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and the `POSTGRES_READONLY_USER`/`POSTGRES_READONLY_PASSWORD` pair for the tool role. `REDIS_PASSWORD` already worked this way (ADR-018).
+  - `build_postgres_url()` renders the URL through SQLAlchemy's `URL.create()`, which percent-encodes each component, and `resolve_postgres_url()` is the single precedence rule: an explicit `DATABASE_URL`/`DATABASE_READONLY_URL` wins verbatim, otherwise the components build the URL, otherwise the documented development default applies.
+  - `Settings` applies that rule in its `model_validator`, and `scripts/check_deploy_credentials.py` calls the same two functions, so the guard audits exactly the URLs the application will use.
+  - `docker-compose.yml` passes components only. The datastore host and port are fixed to the compose service names, so a host-side `.env` pointing at `localhost` cannot leak into a container. `REDIS_URL` is likewise credential-less and `REDIS_PASSWORD` supplies the secret.
+- **Consequences**:
+  - Any password a generator produces works unchanged, including `/`, `+`, `=`, `@` and `#`; nothing in the system has to avoid valid characters.
+  - A deployment that pins a full URL is unaffected, and the compose stack no longer depends on shell-style nested interpolation, which is easier to reason about and to render with `docker compose config`.
+  - The `.env.example` and README no longer teach a hand-built URL containing a password, so the unsafe pattern is not the first thing a new deployment copies.
+  - This supersedes the last consequence of ADR-018: the credential guard no longer demands a password inside `REDIS_URL`, because a credential-less URL plus `REDIS_PASSWORD` is the documented, tested form.
+
+---
+
+## ADR-020: A Reused Read-Only Role Is Restricted and Verified
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**: `scripts/init_readonly_role.py` created the role or, when it already existed, only changed its password: `ALTER ROLE %I WITH LOGIN PASSWORD %L`. Everything the role had accumulated stayed in place. A role that was a `SUPERUSER`, held `CREATEDB`, owned `INSERT`/`CREATE` grants, or was a member of `pg_read_server_files` therefore kept far more than the `SELECT`-only contract the docs promise. Membership is the sharpest case: `SELECT "pg_read_file"('/etc/passwd')` passes the statement lexer (it is a legitimate read of a privileged built-in, and the masker blanks quoted identifiers) and only the role's privileges stand between the agent and the host filesystem. `_enforce_read_only_session` rejected superusers and nothing else.
+- **Decision**:
+  - Provisioning treats an existing role as untrusted input. `restriction_statements()` revokes `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` and `BYPASSRLS`, then revokes all privileges on the database, the `public` schema, all tables, sequences and functions; `_revoke_memberships()` drops every direct membership; only then are `CONNECT`, `USAGE` and `SELECT` granted back.
+  - The script refuses a role that owns the target database, because an owner can grant itself anything, and it verifies the outcome with `_assert_restricted()`, raising `ReadonlyRoleConfigError` instead of reporting a role as provisioned when it is not.
+  - The tool checks the same properties per session, in one round trip: `rolsuper`, `rolbypassrls`, and membership in `pg_read_server_files`, `pg_write_server_files`, `pg_execute_server_program`, `pg_signal_backend`, `pg_monitor` or `pg_maintain`, resolved through `pg_has_role` so indirect membership counts. Any hit is a `ToolSecurityError` before the query runs.
+  - The statement lexer re-exposes plain quoted identifiers to the function denylist (and only there), because PostgreSQL resolves `"pg_read_file"` to the same function as `pg_read_file`. Keyword scans keep masking identifiers, so `SELECT "delete" FROM t` stays valid.
+- **Consequences**:
+  - Re-running the provisioner is safe and now converges a pre-existing role to read-only instead of inheriting its history.
+  - A deployment that cannot restrict its role fails loudly at provisioning time, and one that skips provisioning still fails closed at query time.
+  - `REVOKE ALL … ON ALL FUNCTIONS` also drops function `EXECUTE` grants the role may have relied on; the tool only needs `SELECT`, and a function call in a projection still works through `PUBLIC` execute grants.

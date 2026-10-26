@@ -4,11 +4,18 @@ import json
 import logging
 import time
 import uuid
+from collections import deque
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentkit.core.errors import DuplicateToolCallLoopError, MaxStepsExceeded, RunTimeoutError
+from agentkit.core.errors import (
+    DuplicateToolCallLoopError,
+    MaxStepsExceeded,
+    PersistenceError,
+    RunTimeoutError,
+    SessionHistoryError,
+)
 from agentkit.core.log import log_context, set_current_step_no
 from agentkit.core.trace import StepTrace, TraceSink
 from agentkit.core.types import Role, RunStatus
@@ -49,7 +56,19 @@ class AgentConfig(BaseModel):
     max_consecutive_duplicate_tool_calls: int = Field(
         default=3,
         gt=0,
-        description="Halt run if identical tool calls are repeated consecutively.",
+        description=(
+            "Halt the run when the same tool call (name plus canonical arguments) occurs this "
+            "many times within the tool-call window. The name predates the sliding window; "
+            "repeats do not have to be adjacent."
+        ),
+    )
+    duplicate_tool_call_window: int = Field(
+        default=20,
+        gt=0,
+        description=(
+            "Number of most recent tool calls inspected for repeats. A window wider than the "
+            "repeat threshold catches alternating patterns such as A, B, A, B."
+        ),
     )
     system_prompt: str = Field(
         default=DEFAULT_SYSTEM_PROMPT,
@@ -137,7 +156,15 @@ class Agent:
         session_id: str | None = None,
         raise_on_failure: bool = False,
     ) -> RunResult:
-        """Execute a user goal within an autonomous ReAct loop."""
+        """Execute a user goal within an autonomous ReAct loop.
+
+        Raises:
+            PersistenceError: If the run row cannot be created before execution, or its final
+                state cannot be written afterwards. Execution never continues without a run
+                record, so a caller can always read back what it was told happened.
+            SessionHistoryError: If the session's stored history cannot be read. The run stops
+                rather than replacing that history with a context-free conversation.
+        """
         start_time = time.perf_counter()
         run_id = str(uuid.uuid4())
 
@@ -147,21 +174,45 @@ class Agent:
             logger.info("Starting agent run (goal_chars=%d, session_id=%s)", len(goal), session_id)
             logger.debug("Run goal content: %s", goal)
             if self.memory is not None and hasattr(self.memory, "create_run"):
-                with contextlib.suppress(Exception):
+                try:
                     await self.memory.create_run(
                         run_id=run_id,
                         goal=goal,
                         session_id=session_id,
                     )
+                except Exception as exc:
+                    # Without the run row nothing downstream can be recorded (steps have a
+                    # foreign key to it) and the caller cannot read the run back, so running
+                    # the loop would only produce work nobody can observe.
+                    logger.error(
+                        "Could not create run %s (session_id=%s): %s",
+                        run_id,
+                        session_id,
+                        exc,
+                    )
+                    raise PersistenceError(
+                        f"Run {run_id} could not be persisted; aborting before execution.",
+                        run_id=run_id,
+                    ) from exc
 
             async def _finalize_and_return(result: RunResult) -> RunResult:
                 if session_id and self.memory is not None and hasattr(self.memory, "save_messages"):
                     _repair_trailing_tool_calls(messages)
-                    with contextlib.suppress(Exception):
+                    try:
                         await self.memory.save_messages(session_id, messages)
+                    except Exception as exc:
+                        # The answer itself is valid and the run row is the source of truth, so
+                        # a session-cache write failure must not fail the run. It is still an
+                        # operator-visible fault: the next turn will not see this history.
+                        logger.error(
+                            "Could not persist session history (run_id=%s, session_id=%s): %s",
+                            result.run_id,
+                            session_id,
+                            exc,
+                        )
 
                 if self.memory is not None and hasattr(self.memory, "update_run"):
-                    with contextlib.suppress(Exception):
+                    try:
                         await self.memory.update_run(
                             run_id=result.run_id,
                             status=result.status,
@@ -170,14 +221,71 @@ class Agent:
                             total_input_tokens=result.total_input_tokens,
                             total_output_tokens=result.total_output_tokens,
                         )
+                    except Exception as exc:
+                        # A run row stuck in 'running' with no answer is worse than an explicit
+                        # error: the API would otherwise report a status the database never saw.
+                        logger.error(
+                            "Could not persist final status %s for run %s: %s",
+                            result.status.value,
+                            result.run_id,
+                            exc,
+                        )
+                        # One retry, marking the run failed: if the first write was a transient
+                        # fault this leaves a truthful terminal state instead of 'running'.
+                        try:
+                            await self.memory.update_run(
+                                run_id=result.run_id,
+                                status=RunStatus.FAILED,
+                                final_answer=None,
+                                failure_reason=(
+                                    "Run finished but its final status could not be persisted."
+                                ),
+                                total_input_tokens=result.total_input_tokens,
+                                total_output_tokens=result.total_output_tokens,
+                            )
+                        except Exception as retry_exc:
+                            logger.error(
+                                "Run %s is left in its previous status after a second "
+                                "persistence failure: %s",
+                                result.run_id,
+                                retry_exc,
+                            )
+                        raise PersistenceError(
+                            f"Run {result.run_id} finished but its final status could not be "
+                            "persisted.",
+                            run_id=result.run_id,
+                        ) from exc
                 return result
 
             messages: list[Message] = []
             if session_id and self.memory is not None and hasattr(self.memory, "get_messages"):
-                with contextlib.suppress(Exception):
+                try:
                     loaded = await self.memory.get_messages(session_id)
-                    if loaded:
-                        messages = list(loaded)
+                except Exception as exc:
+                    # Continuing here would answer with no context and then overwrite the real
+                    # history with the shorter one: silent, permanent conversation loss.
+                    logger.error(
+                        "Could not load session history (run_id=%s, session_id=%s): %s",
+                        run_id,
+                        session_id,
+                        exc,
+                    )
+                    # The run row already exists; leave it marked failed rather than running.
+                    if self.memory is not None and hasattr(self.memory, "update_run"):
+                        with contextlib.suppress(Exception):
+                            await self.memory.update_run(
+                                run_id=run_id,
+                                status=RunStatus.FAILED,
+                                failure_reason=("Session history could not be loaded."),
+                            )
+                    if isinstance(exc, SessionHistoryError):
+                        raise
+                    raise SessionHistoryError(
+                        f"Session history for {session_id!r} could not be loaded.",
+                        session_id=session_id,
+                    ) from exc
+                if loaded:
+                    messages = list(loaded)
 
             if not messages:
                 messages = [
@@ -192,8 +300,12 @@ class Agent:
             total_input_tokens = 0
             total_output_tokens = 0
             steps_count = 0
-            last_tool_signature: tuple[str, str] | None = None
-            consecutive_duplicate_count = 0
+            # Sliding window of recent call signatures. Remembering only the immediately
+            # preceding signature lets an alternating pattern (A, B, A, B, ...) reset the
+            # counter on every step, so the guard never fires and the run burns max_steps.
+            recent_tool_signatures: deque[tuple[str, str]] = deque(
+                maxlen=self.config.duplicate_tool_call_window
+            )
 
             try:
                 async with asyncio.timeout(self.config.run_timeout_s):
@@ -218,23 +330,21 @@ class Agent:
                             for call in response.tool_calls:
                                 args_json = json.dumps(call.arguments, sort_keys=True, default=str)
                                 sig = (call.name, args_json)
-                                if sig == last_tool_signature:
-                                    consecutive_duplicate_count += 1
-                                else:
-                                    last_tool_signature = sig
-                                    consecutive_duplicate_count = 1
+                                recent_tool_signatures.append(sig)
+                                repeat_count = sum(
+                                    1 for recent in recent_tool_signatures if recent == sig
+                                )
 
-                                if (
-                                    consecutive_duplicate_count
-                                    >= self.config.max_consecutive_duplicate_tool_calls
-                                ):
+                                if repeat_count >= self.config.max_consecutive_duplicate_tool_calls:
                                     duration_ms = max(
                                         0, int((time.perf_counter() - start_time) * 1000)
                                     )
                                     logger.warning(
-                                        "Detected duplicate tool call loop for '%s' (%d consecutive calls)",
+                                        "Detected duplicate tool call loop for '%s' (%d repeats "
+                                        "within %d calls)",
                                         call.name,
-                                        consecutive_duplicate_count,
+                                        repeat_count,
+                                        self.config.duplicate_tool_call_window,
                                     )
                                     res = RunResult(
                                         run_id=run_id,
@@ -243,7 +353,9 @@ class Agent:
                                         status=RunStatus.FAILED,
                                         failure_reason=(
                                             f"Detected duplicate tool call loop: '{call.name}' called "
-                                            f"{consecutive_duplicate_count} consecutive times with identical arguments: {call.arguments}"
+                                            f"{repeat_count} times with identical arguments within "
+                                            f"the last {self.config.duplicate_tool_call_window} "
+                                            f"tool calls: {call.arguments}"
                                         ),
                                         steps_count=steps_count,
                                         total_input_tokens=total_input_tokens,
@@ -252,9 +364,7 @@ class Agent:
                                     )
                                     await _finalize_and_return(res)
                                     if raise_on_failure:
-                                        raise DuplicateToolCallLoopError(
-                                            call.name, consecutive_duplicate_count
-                                        )
+                                        raise DuplicateToolCallLoopError(call.name, repeat_count)
                                     return res
 
                                 logger.info(
@@ -296,10 +406,53 @@ class Agent:
                                         )
                                         await self.trace.record(trace_record)
                         else:
-                            # Final natural language answer reached
+                            # No tool calls: this is the final answer, a provider refusal, or
+                            # an empty completion. Only a non-empty answer is a success; the
+                            # other two used to be reported as SUCCEEDED with a blank answer.
                             duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
+                            if response.text:
+                                messages.append(Message.assistant(response.text))
+
+                            if response.refusal_reason is not None:
+                                logger.warning(
+                                    "Provider refused the run: %s", response.refusal_reason
+                                )
+                                return await _finalize_and_return(
+                                    RunResult(
+                                        run_id=run_id,
+                                        session_id=session_id,
+                                        goal=goal,
+                                        status=RunStatus.REFUSED,
+                                        failure_reason=response.refusal_reason,
+                                        steps_count=steps_count,
+                                        total_input_tokens=total_input_tokens,
+                                        total_output_tokens=total_output_tokens,
+                                        duration_ms=duration_ms,
+                                    )
+                                )
+
+                            if not response.text.strip():
+                                logger.warning(
+                                    "Provider returned an empty response for run %s", run_id
+                                )
+                                return await _finalize_and_return(
+                                    RunResult(
+                                        run_id=run_id,
+                                        session_id=session_id,
+                                        goal=goal,
+                                        status=RunStatus.FAILED,
+                                        failure_reason=(
+                                            "Provider returned an empty response "
+                                            "(no text and no tool calls)."
+                                        ),
+                                        steps_count=steps_count,
+                                        total_input_tokens=total_input_tokens,
+                                        total_output_tokens=total_output_tokens,
+                                        duration_ms=duration_ms,
+                                    )
+                                )
+
                             logger.info("Agent run succeeded in %d ms", duration_ms)
-                            messages.append(Message.assistant(response.text))
                             return await _finalize_and_return(
                                 RunResult(
                                     run_id=run_id,
@@ -332,6 +485,10 @@ class Agent:
                         raise MaxStepsExceeded(self.config.max_steps)
                     return res_max
 
+            except PersistenceError:
+                # Already logged with its run id; re-raise rather than converting it into a
+                # FAILED result that the caller could mistake for an executed-but-failed run.
+                raise
             except TimeoutError as exc:
                 duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
                 logger.warning("Agent run timed out after %s seconds", self.config.run_timeout_s)

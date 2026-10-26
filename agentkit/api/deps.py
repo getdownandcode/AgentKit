@@ -88,7 +88,11 @@ def get_memory_store(request: Request) -> PostgresMemoryStore | MemoryStore:
     )
 
     run_store = PostgresMemoryStore(factory)
-    session_store = RedisMemoryStore(redis_client, ttl_s=settings.SESSION_TTL_S)
+    session_store = RedisMemoryStore(
+        redis_client,
+        ttl_s=settings.SESSION_TTL_S,
+        max_messages=settings.SESSION_MAX_MESSAGES,
+    )
     return TieredMemoryStore(session_store=session_store, run_store=run_store)
 
 
@@ -150,14 +154,24 @@ def get_llm_client(
     if override is not None:
         return override
 
+    # Built once per application, not once per request: every provider client owns its own
+    # HTTP transport and connection pool, so per-request construction leaked sockets and
+    # defeated pooling. The lifespan closes this instance on shutdown.
+    managed: LLMClient | None = getattr(request.app.state, "managed_llm_client", None)
+    if managed is not None:
+        return managed
+
     try:
-        return create_llm_client_from_settings(settings)
+        client = create_llm_client_from_settings(settings)
     except Exception as exc:
         logger.error("Failed to initialize LLM provider %s: %s", settings.LLM_PROVIDER, exc)
         raise ServiceUnavailableError(
             "llm",
             f"LLM provider '{settings.LLM_PROVIDER}' could not be initialized.",
         ) from exc
+
+    request.app.state.managed_llm_client = client
+    return client
 
 
 def get_agent(
@@ -182,6 +196,7 @@ def get_agent(
         max_steps=settings.MAX_STEPS,
         run_timeout_s=settings.RUN_TIMEOUT_S,
         tool_timeout_s=settings.TOOL_TIMEOUT_S,
+        tool_output_max_chars=settings.TOOL_OUTPUT_MAX_CHARS,
     )
     return Agent(
         llm=llm,

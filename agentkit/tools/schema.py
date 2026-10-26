@@ -71,6 +71,18 @@ def create_tool_schema(
     if required:
         parameters["required"] = required
 
+    # Pydantic emits nested models and enums as ``$ref: "#/$defs/..."`` with the definitions
+    # in a sibling ``$defs`` key. Keeping only type/properties/required left those references
+    # dangling, which providers reject or mis-handle. Every other key is carried over
+    # verbatim — ``$defs``, ``additionalProperties`` and the per-property titles/defaults
+    # inside them — while the three above stay first. The top-level ``title`` is the generated
+    # model name and carries no meaning for the provider, so it is dropped to keep simple
+    # built-in schemas byte-identical to what providers already accept.
+    for key, value in raw_json_schema.items():
+        if key in ("type", "properties", "required", "$schema", "title"):
+            continue
+        parameters[key] = value
+
     schema = ToolSchema(
         name=tool_name,
         description=tool_desc,

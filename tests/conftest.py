@@ -11,7 +11,9 @@ AGENTKIT_REAL_INFRA=1 so the default `pytest` invocation stays hermetic.
     AGENTKIT_REAL_INFRA=1 pytest -m real_infra
 
 Connection URLs are taken from DATABASE_TEST_URL / REDIS_TEST_URL, falling back
-to the application's DATABASE_URL / REDIS_URL.
+to the application's DATABASE_URL / REDIS_URL. The compose stack requires Redis
+to authenticate, so REDIS_PASSWORD is completed into a credential-less URL the
+same way :class:`agentkit.config.Settings` does it for the application.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from agentkit.config import get_settings
+from agentkit.config import apply_redis_password, get_settings
 
 REAL_INFRA_ENV_FLAG = "AGENTKIT_REAL_INFRA"
 TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -67,8 +69,16 @@ def database_test_url() -> str:
 
 
 def redis_test_url() -> str:
-    """Resolve the Redis URL used by the real-infrastructure suite."""
-    return os.getenv("REDIS_TEST_URL") or os.getenv("REDIS_URL") or get_settings().REDIS_URL
+    """Resolve the Redis URL used by the real-infrastructure suite.
+
+    An explicit ``REDIS_TEST_URL`` is authoritative and used verbatim apart from
+    ``REDIS_PASSWORD`` completion, so CI keeps its own URL. A password set only in
+    ``.env`` is invisible to ``os.environ`` (pydantic-settings reads the file into
+    ``Settings``), hence the settings fallback.
+    """
+    url = os.getenv("REDIS_TEST_URL") or os.getenv("REDIS_URL") or get_settings().REDIS_URL
+    password = os.getenv("REDIS_PASSWORD") or get_settings().REDIS_PASSWORD
+    return apply_redis_password(url, password)
 
 
 def _upgrade_schema(database_url: str) -> None:

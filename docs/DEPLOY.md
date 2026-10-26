@@ -178,6 +178,10 @@ Fetch production secrets dynamically using the AWS CLI:
 # Create parameters in AWS SSM
 aws ssm put-parameter --name "/agentkit/production/DATABASE_PASSWORD" \
     --value "$(openssl rand -hex 24)" --type "SecureString"
+aws ssm put-parameter --name "/agentkit/production/READONLY_PASSWORD" \
+    --value "$(openssl rand -hex 24)" --type "SecureString"
+aws ssm put-parameter --name "/agentkit/production/REDIS_PASSWORD" \
+    --value "$(openssl rand -hex 24)" --type "SecureString"
 aws ssm put-parameter --name "/agentkit/production/API_KEYS" \
     --value "prod_key_$(openssl rand -hex 16)" --type "SecureString"
 aws ssm put-parameter --name "/agentkit/production/GEMINI_API_KEY" \
@@ -189,14 +193,22 @@ cat << 'EOF' > /opt/agentkit/fetch_secrets.sh
 set -euo pipefail
 
 DB_PASS=$(aws ssm get-parameter --name "/agentkit/production/DATABASE_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
+RO_PASS=$(aws ssm get-parameter --name "/agentkit/production/READONLY_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
+REDIS_PASS=$(aws ssm get-parameter --name "/agentkit/production/REDIS_PASSWORD" --with-decryption --query "Parameter.Value" --output text)
 API_KEYS=$(aws ssm get-parameter --name "/agentkit/production/API_KEYS" --with-decryption --query "Parameter.Value" --output text)
 GEMINI_KEY=$(aws ssm get-parameter --name "/agentkit/production/GEMINI_API_KEY" --with-decryption --query "Parameter.Value" --output text)
 
+# Credentials are written as components, not inside connection URLs: the generated
+# passwords contain '/', '+' and '=', and AgentKit escapes them while it builds the URL.
 cat << ENVFILE > /opt/agentkit/.env
-DATABASE_URL=postgresql+asyncpg://agentkit:${DB_PASS}@postgres:5432/agentkit
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
 POSTGRES_USER=agentkit
 POSTGRES_PASSWORD=${DB_PASS}
+POSTGRES_READONLY_USER=agentkit_readonly
+POSTGRES_READONLY_PASSWORD=${RO_PASS}
 POSTGRES_DB=agentkit
+REDIS_PASSWORD=${REDIS_PASS}
 REDIS_URL=redis://redis:6379/0
 LLM_PROVIDER=gemini
 LLM_MODEL=gemini-3.1-flash-lite
@@ -221,6 +233,66 @@ If configuring manually, create `/opt/agentkit/.env` from `.env.example`:
 cp .env.example .env
 chmod 600 .env  # Restrict permissions: read/write only for owner
 ```
+
+### Datastore Exposure and Credentials
+
+The compose stack treats PostgreSQL and Redis as internal services, because everything it
+stores — run goals, final answers, full conversation history, rate-limit counters — is
+readable by anyone who can reach those ports.
+
+- **Loopback-only ports by default.** `postgres` and `redis` publish on `127.0.0.1`
+  (`${POSTGRES_BIND:-127.0.0.1}` / `${REDIS_BIND:-127.0.0.1}`). Containers reach each other
+  over `agentkit-net`; the host mapping exists only for local inspection. Setting
+  `POSTGRES_BIND=0.0.0.0` or `REDIS_BIND=0.0.0.0` is a deliberate opt-in — do not do it on a
+  shared host or CI runner without a firewall rule in front.
+- **No default passwords.** Compose requires `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD`
+  and `REDIS_PASSWORD`; interpolation fails when one is missing instead of silently falling
+  back to `postgres`/`postgres` or an unauthenticated Redis. Generate each one with
+  `openssl rand -base64 24`.
+- **Credentials are never interpolated into a URL.** Compose passes `POSTGRES_HOST`,
+  `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and the
+  `POSTGRES_READONLY_*` pair; `Settings` assembles `DATABASE_URL` and `DATABASE_READONLY_URL`
+  from them and percent-encodes every component. This matters because
+  `openssl rand -base64 24` produces `/`, `+` and `=`: a raw `/` ends the URL authority, so the
+  remainder of the password becomes the path and the connection resolves to a database that
+  does not exist. An explicitly configured `DATABASE_URL` / `DATABASE_READONLY_URL` still
+  wins, for a managed database behind a secret substitution. Inside the stack the service
+  names are authoritative, so a host-side `.env` pointing at `localhost` cannot leak into a
+  container.
+- **Redis authenticates.** The service starts with `redis-server --requirepass` sourced from
+  `REDIS_PASSWORD`. `REDIS_PASSWORD` is authoritative: it is embedded (percent-encoded) into a
+  `REDIS_URL` that carries no credentials of its own, so the secret need not be repeated inside
+  the URL, and an explicit password in the URL still wins. The healthcheck authenticates too,
+  so a password mismatch surfaces as an unhealthy container rather than 401s at runtime. The
+  real-infrastructure suite resolves credentials the same way, which is why
+  `AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real` works against this stack without a
+  `REDIS_TEST_URL` — pass `REDIS_PASSWORD` (or let it come from `.env`) with any override URL.
+- **The guard fails closed.** The `migrations` service runs
+  `python scripts/check_deploy_credentials.py` before anything else. It rejects the image
+  defaults, the documented placeholders, short passwords, a missing read-only URL, a read-only
+  role equal to the application role, and a `REDIS_URL` without a password.
+- **Read-only SQL role.** `python scripts/init_readonly_role.py` provisions
+  `POSTGRES_READONLY_USER` with `CONNECT`/`USAGE`/`SELECT` only and
+  `default_transaction_read_only = on`. The `sql_readonly` tool connects with it and refuses to
+  run when `DATABASE_READONLY_URL` is absent, so the agent never touches the application role.
+  A role that already exists is *restricted*, not merely given a new password: the script
+  revokes `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` and `BYPASSRLS`, drops every
+  inherited role membership (`pg_read_server_files` would otherwise allow `pg_read_file`) and
+  revokes all non-`SELECT` object privileges before granting `SELECT` back. It then verifies
+  the result and exits non-zero if anything remains, and it refuses a role that owns the
+  database, because an owner can grant itself anything. At request time the tool independently
+  refuses a superuser, a role with `BYPASSRLS`, or a role that is (directly or indirectly) a
+  member of `pg_read_server_files`, `pg_write_server_files`, `pg_execute_server_program`,
+  `pg_signal_backend`, `pg_monitor` or `pg_maintain`.
+
+Verify the effective configuration before starting the stack:
+
+```bash
+docker compose config | grep -E "POSTGRES_BIND|REDIS_BIND|requirepass|POSTGRES_READONLY_USER|REDIS_URL"
+```
+
+No credential appears inside a URL in that output: the datastore URLs are built by the
+application from the component variables.
 
 ---
 

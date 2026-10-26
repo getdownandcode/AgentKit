@@ -21,7 +21,7 @@ Designed from first principles for reliability, auditability, and production dep
 - **Declarative Type-Safe Tools**: Register Python functions with the `@tool` decorator. Function signatures, type hints, and docstrings are introspected into strict JSON Schema and dynamic Pydantic argument validators.
 - **Production Built-in Tools**:
   - `calculator`: AST-parsed mathematical evaluator with strict operator whitelisting and recursion/exponent limits.
-  - `sql_readonly`: Read-only SQL executor with single-SELECT AST validation, comment stripping, and DDL/DML blocking.
+  - `sql_readonly`: Read-only SQL executor over a dedicated non-superuser role (`DATABASE_READONLY_URL`, `default_transaction_read_only`, `SELECT`-only grants, fail-closed when unconfigured). A statement lexer accepts a single `SELECT`/`WITH`, rejects comments, DDL/DML and privileged built-ins (`pg_read_file`, `setval`, `query_to_xml`, …), and clamps `LIMIT ALL`/oversized limits in SQL.
   - `read_file`: Path traversal and symlink escape defended sandboxed file reader.
   - `http_fetch`: SSRF-protected HTTP client blocking private subnets, loopbacks, and cloud metadata endpoints.
   - `web_search`: Search provider adapter with result truncation.
@@ -106,8 +106,17 @@ LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENAI_API_KEY=your_openai_api_key_here
 
-# Persistence
-DATABASE_URL=postgresql+asyncpg://agentkit:agentkit_password@localhost:5432/agentkit
+# Persistence. Credentials are components, not parts of a URL: AgentKit escapes them
+# while it builds DATABASE_URL / DATABASE_READONLY_URL, so a password may contain
+# '/', '+' or '=' (as `openssl rand -base64 24` output does).
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=agentkit
+POSTGRES_PASSWORD=agentkit_password
+POSTGRES_DB=agentkit
+POSTGRES_READONLY_USER=agentkit_readonly
+POSTGRES_READONLY_PASSWORD=agentkit_readonly_password
+REDIS_PASSWORD=redis_password
 REDIS_URL=redis://localhost:6379/0
 
 # Security (API_KEYS is required; the app refuses to start without it)
@@ -337,13 +346,15 @@ Redis, covering behaviour the hermetic tier structurally cannot assert:
 # Start the services the tier needs
 docker compose up -d postgres redis
 
-# Run only the real-infrastructure suite
+# Run only the real-infrastructure suite. REDIS_PASSWORD is completed into a
+# credential-less REDIS_TEST_URL, so a hardened (--requirepass) Redis authenticates.
 AGENTKIT_REAL_INFRA=1 pytest -m real_infra tests/real
 
 # Or point it at any other PostgreSQL / Redis
 AGENTKIT_REAL_INFRA=1 \
   DATABASE_TEST_URL=postgresql+asyncpg://user:pass@localhost:5432/agentkit_test \
   REDIS_TEST_URL=redis://localhost:6379/15 \
+  REDIS_PASSWORD=their_password \
   pytest -m real_infra tests/real
 ```
 

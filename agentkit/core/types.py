@@ -10,6 +10,8 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    #: The provider refused or filtered the response (safety block, content filter, refusal).
+    REFUSED = "refused"
     MAX_STEPS_EXCEEDED = "max_steps_exceeded"
     TIMED_OUT = "timed_out"
 

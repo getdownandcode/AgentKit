@@ -51,7 +51,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | M13-T01 | M13       | Real-Infrastructure Test Tier | `fix/real-infrastructure-verification` | #44 | 1 | Done | Opt-in live test tier against real PostgreSQL and Redis |
 | M13-T02 | M13       | Atomic Sliding-Window Rate Limiting | `fix/real-infrastructure-verification` | #44 | 1 | Done | Atomic Lua script eliminating 19/20 concurrency bypass |
 | M13-T03 | M13       | CI Split, Compose Hardening | `fix/real-infrastructure-verification` | #44 | 1 | Done | CI live service job, strict compose API_KEYS, demo persistence |
-| M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, tool role, gemini-2.0-flash default |
+| M13-T04 | M13       | Gemini Tool Calling & Active Model Standard | `feat/gemini-tool-calling-fix` | #45 | 2 | Done | Thought signature preservation, function-response role; default model `gemini-3.1-flash-lite` (corrected from an earlier `gemini-2.0-flash` claim) |
 | M13-T05 | M13       | Idempotent Demo Seeding & Compose Auto-Seed | `feat/docker-compose-seed` | #46 | 2 | Done | ON CONFLICT DO NOTHING, scripts/seed.py, compose boot auto-seed |
 | AUD-01  | AUD       | Strict Infrastructure Resolution in API Dependencies | `fix/api-deps-strict-infrastructure` | #48 | 2 | Done | Eliminate silent in-memory and fake LLM fallbacks from deps.py |
 | AUD-04  | AUD       | Wire RetryingLLMClient into LLM Factory | `fix/wire-llm-retry-wrapper` | #49 | 2 | Done | Added MAX_RETRIES setting and wrapped live LLM providers with retry |
@@ -61,6 +61,16 @@ This document tracks execution progress across all backlog tasks, including pull
 | AUD-09  | AUD       | Live End-to-End Infrastructure Verification & Documentation Proof | `docs/e2e-verification-report` | #53 | 3 | Done | Standardized model, verified live stack, and documented in E2E_REPORT.md |
 | AUD-10  | AUD       | Rate Limiter Outage Fallback & Provider-Valid Session History | `fix/ratelimit-and-session-repair` | #56 | 3 | Done | In-memory fallback on Redis connection failures; synthetic tool results repair aborted sessions |
 | M13-T06 | M13       | Whole-Project Audit Remediation | `fix/audit-hardening` | #47 | 3 | Done | Fail-closed config and LLM resolution, SSRF post-connect check, atomic fallback |
+| AUDIT-01/02 | AUDIT | Read-Only SQL Isolation and Row Cap | `fix/sql-readonly-isolation` | #84 | 1 | Done | Dedicated non-superuser role, dollar-quote/E-string masking, built-in denylist, clamped server-side row cap |
+| AUDIT-18 | AUDIT | Compose Datastore Hardening | `chore/compose-hardening` | #84 | 1 | Done | Loopback-only datastore ports, required Postgres/Redis passwords, fail-closed credential guard |
+| AUDIT-03/08/09 | AUDIT | Persistence Integrity | `fix/persistence-integrity` | #84 | 1 | Done | Loud persistence failures (503, not phantom 200), no fabricated run row, session_id bounded at the API |
+| AUDIT-04/10/11 | AUDIT | Session History Durability | `fix/session-history` | #84 | 1 | Done | Base64 thought-signature codec, fail-closed history load, SESSION_MAX_MESSAGES with boundary-safe truncation |
+| AUDIT-05/06 | AUDIT | Gemini Wire-Format Fidelity | `fix/gemini-adapter` | #84 | 1 | Done | Grouped parallel function responses with provider ids; thought parts excluded from the answer |
+| AUDIT-07 | AUDIT | Provider Refusal Status | `fix/provider-refusal-status` | #84 | 1 | Done | Blocks/refusals map to RunStatus.REFUSED; empty completions fail instead of succeeding |
+| AUDIT-12/13/14 | AUDIT | Tool Schemas, Client Lifecycle, Settings | `fix/tools-resources-config` | #84 | 1 | Done | $defs preserved, one shared provider client closed on shutdown, TOOL_OUTPUT_MAX_CHARS and all compose settings wired |
+| AUDIT-15/17 | AUDIT | Loop Detection and API Key Auth | `fix/agent-loop-and-auth` | #84 | 1 | Done | Sliding-window duplicate detector; hmac.compare_digest with normalised keys |
+| AUDIT-16 | AUDIT | Documentation Claim Corrections | `docs/correct-audit-claims` | #84 | 1 | Done | README/ARCHITECTURE/AUDIT/ADR-006/PROGRESS/PLAN corrected and guarded by tests |
+| AUDIT-18-FU | AUDIT | Real-Infra Redis Authentication | `fix/real-infra-redis-auth` | #84 | 1 | Done | `REDIS_PASSWORD` completes a credential-less `REDIS_URL` for the app and the live suite; 18 fixture errors fixed |
 
 ---
 
@@ -73,260 +83,260 @@ This document tracks execution progress across all backlog tasks, including pull
 ### M0-T02: Configuration Management
 - **Status**: Done
 - **PR**: #1
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `agentkit/config.py` with Settings, field constraints, API keys list helper, and cached getter. Unit tests in `tests/unit/test_config.py`.
 
 ### M0-T03: Domain Errors & Core Base Types
 - **Status**: Done
 - **PR**: #2
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `agentkit/core/errors.py` and `agentkit/core/types.py` with StrEnum and structured error serialization. Unit tests in `tests/unit/test_errors_types.py`.
 
 ### M1-T01: Tool Models & ToolResult Specification
 - **Status**: Done
 - **PR**: #3
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented frozen Pydantic models for ToolResult, ToolCall, and ToolSchema in `agentkit/tools/models.py`. Unit tests in `tests/unit/test_tool_models.py`.
 
 ### M1-T02: Signature Inspection & JSON Schema Generator
 - **Status**: Done
 - **PR**: #4
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `create_tool_schema` in `agentkit/tools/schema.py` using inspect and dynamic Pydantic model creation. Unit tests in `tests/unit/test_tool_schema.py`.
 
 ### M1-T03: @tool Decorator & Registry Storage
 - **Status**: Done
 - **PR**: #5
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `ToolRegistry` and `@tool` with generic type-preserving overloads in `agentkit/tools/registry.py`. Unit tests in `tests/unit/test_tool_registry.py`.
 
 ### M1-T04: Safe Tool Execution Engine
 - **Status**: Done
 - **PR**: #6
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `execute_tool` in `agentkit/tools/executor.py` and `ToolRegistry.execute()` with sync threadpool dispatch, timeouts, truncation, and error wrapping. Unit tests in `tests/unit/test_tool_executor.py`.
 
 ### M2-T01: Abstract LLMClient Interface
 - **Status**: Done
 - **PR**: #7
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `LLMClient` ABC, `Message`, `TokenUsage`, and `LLMResponse` in `agentkit/llm/base.py`. Unit tests in `tests/unit/test_llm_base.py`.
 
 ### M2-T02: Scripted FakeLLMClient
 - **Status**: Done
 - **PR**: #8
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `FakeLLMClient` in `agentkit/llm/fake.py` supporting FIFO scripted responses, queue helpers, call history, and tools history. Unit tests in `tests/unit/test_fake_llm.py`.
 
 ### M2-T03: Google Gemini SDK Adapter
 - **Status**: Done
 - **PR**: #9
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `GeminiClient` in `agentkit/llm/gemini.py` with google-genai SDK, FunctionDeclaration translation, candidate parsing, and usage accounting. Unit tests in `tests/unit/test_gemini_adapter.py`.
 
 ### M3-T01: Agent State Machine & Configuration
 - **Status**: Done
 - **PR**: #10
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `AgentConfig`, `RunResult`, and `Agent` class in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent.py`.
 
 ### M3-T02: Core ReAct Reasoning Step Loop
 - **Status**: Done
 - **PR**: #11
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented ReAct step loop with tool execution, token accumulation, trace hooks, and answer exit in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent_loop.py`.
 
 ### M3-T03: Loop Termination & Timeout Guards
 - **Status**: Done
 - **PR**: #12
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `asyncio.timeout(config.run_timeout_s)` guard, `RunStatus.TIMED_OUT`, `RunStatus.MAX_STEPS_EXCEEDED`, and optional `raise_on_failure` in `agentkit/core/agent.py`. Updated `RunTimeoutError` signature in `agentkit/core/errors.py`. Unit tests in `tests/unit/test_agent_guards.py`.
 
 ### M3-T04: Duplicate Tool Call Loop Detection
 - **Status**: Done
 - **PR**: #13
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `DuplicateToolCallLoopError` in `agentkit/core/errors.py`, `max_consecutive_duplicate_tool_calls` in `AgentConfig`, canonical JSON argument serialization, and loop aborting logic in `agentkit/core/agent.py`. Unit tests in `tests/unit/test_agent_loop_detector.py`.
 
 ### M4-T01: Safe AST Calculator Tool
 - **Status**: Done
 - **PR**: #14
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `calculator` tool and `safe_calculate` in `agentkit/tools/builtin/calculator.py` using Python `ast` parsing, operator whitelist, node count limit, and exponent limit. 24 unit and security tests in `tests/unit/test_tool_calculator.py`.
 
 ### M4-T02: Sandboxed File Reader Tool
 - **Status**: Done
 - **PR**: #15
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `read_file` tool and `read_sandboxed_file` in `agentkit/tools/builtin/read_file.py` with strict `FILE_TOOL_BASE_DIR` sandboxing, symlink escape defenses, path traversal protection, size caps, and UTF-8 verification. Unit tests in `tests/unit/test_tool_read_file.py`.
 
 ### M4-T03: SSRF-Protected HTTP Fetch Tool
 - **Status**: Done
 - **PR**: #16
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `http_fetch` tool and `validate_url_ssrf` in `agentkit/tools/builtin/http_fetch.py` blocking loopback, RFC1918 private subnets, cloud metadata (169.254.169.254), non-HTTP/HTTPS schemes, with per-hop redirect re-validation. Unit tests in `tests/unit/test_tool_http_fetch.py`.
 
 ### M4-T04: Read-Only SQL Tool
 - **Status**: Done
 - **PR**: #17
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `sql_readonly` tool, `validate_sql_query`, and `execute_sql_query` in `agentkit/tools/builtin/sql_readonly.py` restricting execution strictly to single SELECT or WITH statements, blocking comments and DDL/DML, capping row count, and formatting results as Markdown tables. Unit tests in `tests/unit/test_tool_sql_readonly.py`.
 
 ### M4-T05: Web Search Tool Adapter
 - **Status**: Done
 - **PR**: #18
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `web_search` tool and `search_web` in `agentkit/tools/builtin/web_search.py` connecting to Tavily search API, limiting results, handling missing API keys with informative errors, and formatting output as numbered snippets. Unit tests in `tests/unit/test_tool_web_search.py`.
 
 ### M5-T01: TraceSink Protocol & InMemoryTraceSink
 - **Status**: Done
 - **PR**: #19
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `StepTrace` frozen Pydantic model and `TraceSink` abstract interface in `agentkit/core/trace.py`, along with `InMemoryTraceSink` and execution trace hook integration in `Agent.run()`. Unit tests in `tests/unit/test_trace.py`.
 
 ### M5-T02: Contextual Structured JSON Logger
 - **Status**: Done
 - **PR**: #20
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `JSONFormatter` and async-safe context propagation (`log_context`, `set_current_run_id`, `set_current_step_no`) in `agentkit/core/log.py`. Integrated contextual logging into `Agent.run()` so that all log records emitted during a run are automatically tagged with `run_id` and sequential `step_no`. Unit tests in `tests/unit/test_log.py`.
 
 ### M5-T03: PostgreSQL Trace Sink
 - **Status**: Done
 - **PR**: #21
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `PostgresTraceSink` in `agentkit/core/pg_trace.py` and SQLAlchemy 2.0 `Run` and `Step` models in `agentkit/db/models.py` with composite index on `(run_id, step_no)` and defensive parent run creation. Unit tests with in-memory async SQLite in `tests/unit/test_pg_trace.py`.
 
 ### M6-T01: Abstract MemoryStore Interface
 - **Status**: Done
 - **PR**: #22
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented abstract `MemoryStore` ABC in `agentkit/memory/base.py` for session conversation messages and run state persistence, along with `RunRecord` immutable model and `InMemoryMemoryStore` for local/test execution. Unit tests in `tests/unit/test_memory_base.py`.
 
 ### M6-T02: Async Redis Session Store
 - **Status**: Done
 - **PR**: #23
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `RedisMemoryStore` in `agentkit/memory/redis_store.py` providing session message serialization, configurable TTL (`SESSION_TTL_S`), and sliding-window history truncation preserving the initial system prompt. Unit tests with `fakeredis` in `tests/unit/test_redis_store.py`.
 
 ### M6-T03: Database Models & Alembic Migrations
 - **Status**: Done
 - **PR**: #24
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Configured Alembic with `alembic.ini`, `migrations/env.py` (with support for asyncpg and sync drivers), and initial schema revision `001_initial_runs_and_steps.py` establishing `runs` and `steps` tables, foreign keys, and indexes. Integration test in `tests/integration/test_migrations.py`.
 
 ### M6-T04: PostgreSQL Run & Step Repository
 - **Status**: Done
 - **PR**: #25
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `PostgresMemoryStore` in `agentkit/memory/pg_store.py` providing asynchronous run creation, status and metrics updating, single run retrieval, step trace querying ordered by step number, and session-filtered run listing. Unit tests with in-memory SQLite in `tests/unit/test_pg_store.py`.
 
 ### M7-T01: FastAPI Application Core & Handlers
 - **Status**: Done
 - **PR**: #26
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `create_app` factory in `agentkit/api/main.py` with async lifespan context management for database engines and Redis connection pools, plus unified global exception handlers translating `AgentKitError`, `RequestValidationError`, `HTTPException`, and server exceptions into standard `{"error": {"code": "...", "message": "..."}}` responses. Unit tests in `tests/unit/test_api_core.py`.
 
 ### M7-T02: API Key Authentication Dependency
 - **Status**: Done
 - **PR**: #27
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `verify_api_key` security dependency in `agentkit/api/auth.py` validating incoming `X-API-Key` headers against configured `API_KEYS`. Mapped `AuthenticationError` to 401 Unauthorized in global exception handlers. Configured ruff for immutable FastAPI `Security` / `Depends` calls. Unit tests in `tests/unit/test_api_auth.py`.
 
 ### M7-T03: Run Management Routes
 - **Status**: Done
 - **PR**: #28
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `POST /runs`, `GET /runs/{run_id}`, and `GET /runs/{run_id}/trace` in `agentkit/api/routes.py`. Defined Pydantic boundary models in `agentkit/api/schemas.py`. Created dependency injection providers in `agentkit/api/deps.py` and database session utilities in `agentkit/db/session.py`. Integrated automatic run persistence across completion and failure paths in `Agent.run`. Added `RunNotFoundError` mapped to 404. Integration tests in `tests/integration/test_api_runs.py`.
 
 ### M7-T04: Discovery & Health Routes
 - **Status**: Done
 - **PR**: #29
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `GET /tools` returning list of registered tools with introspected JSON schemas (protected by `X-API-Key`). Implemented `GET /health` with live `SELECT 1` database query and Redis client ping (publicly accessible). Added `discovery_router` in `agentkit/api/routes.py` and wired into `create_app`. Integration tests in `tests/integration/test_api_health.py`.
 
 ### M8-T01: OpenAI SDK Adapter
 - **Status**: Done
 - **PR**: #30
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `OpenAIClient` adapter in `agentkit/llm/openai.py` using official `openai` SDK. Supports message translation, function schema mapping, tool call argument parsing, token usage extraction, and domain exception mapping (`AuthenticationError`, `RateLimitExceededError`, `LLMProviderError`). Unit tests in `tests/unit/test_llm_openai.py`.
 
 ### M8-T02: Provider Factory
 - **Status**: Done
 - **PR**: #31
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `create_llm_client` and `create_llm_client_from_settings` in `agentkit/llm/factory.py` dynamically provisioning `GeminiClient`, `OpenAIClient`, or `FakeLLMClient` with case normalization and provider validation. Integrated into FastAPI `get_llm_client` dependency in `agentkit/api/deps.py`. Unit tests in `tests/unit/test_llm_factory.py`.
 
 ### M9-T01: LLM Exponential Backoff Retry with Jitter
 - **Status**: Done
 - **PR**: #32
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented async exponential backoff retry decorator and `RetryingLLMClient` wrapper in `agentkit/llm/retry.py`. Accurately distinguishes transient errors (`RateLimitExceededError`, `TimeoutError`, `ConnectionError`, `LLMProviderError` for 429 and 5xx) from non-transient errors (4xx, `AuthenticationError`, `ValueError`) which fail immediately. Unit tests in `tests/unit/test_llm_retry.py`.
 
 ### M9-T02: Redis-Backed Sliding Window Rate Limiter
 - **Status**: Done
 - **PR**: #33
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented sliding window `RateLimiter` dependency in `agentkit/api/ratelimit.py` backed by Redis Sorted Sets (ZSET) with microsecond precision and an in-memory fallback. Returns HTTP 429 with computed `Retry-After` header when limit is exceeded. Wired into `/runs` and `/tools` endpoints. Unit tests in `tests/unit/test_api_ratelimit.py`.
 
 ### M9-T03: Step and Run Timeout Verification
 - **Status**: Done
 - **PR**: #34
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented end-to-end integration tests in `tests/integration/test_timeouts.py` verifying that hanging tools exceeding `tool_timeout_s` fail gracefully without aborting the agent, allowing the LLM to recover. Verified that hanging runs trigger `RunStatus.TIMED_OUT` with proper database persistence, that `raise_on_failure=True` raises `RunTimeoutError`, and that tool timeouts are recorded in `PostgresTraceSink`.
 
 ### M10-T01: Tool Failure Self-Correction Integration Test
 - **Status**: Done
 - **PR**: #35
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented integration tests in `tests/integration/test_recovery.py` verifying that when a tool call fails with a computational error (calculator division by zero) or a file system error (sandboxed file not found), the error message is preserved in the conversation history as a tool response turn and the model successfully self-corrects its arguments on subsequent turns.
 
 ### M10-T02: Prompt Injection Resistance Test
 - **Status**: Done
 - **PR**: #36
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented integration tests in `tests/integration/test_injection.py` verifying that prompt injection attack payloads in tool outputs and error messages are strictly quarantined within `Role.TOOL` message turns and cannot overwrite system instructions or hijack the agent's behavior. Updated `agentkit/tools/executor.py` to handle direct `ToolResult` returns with `model_copy`.
 
 ### M10-T03: Comprehensive Built-in Tools Security Suite
 - **Status**: Done
 - **PR**: #37
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented exhaustive unit security test suite in `tests/unit/test_security_tools.py` covering AST evasion (blocking `eval`, `exec`, `open`, `__import__`, subclasses, lambda, comprehensions), SQL injection defenses (blocking DDL, DML, multi-statement queries, comments, PRAGMA/VACUUM), path traversal and symlink escapes in sandboxed file reader, and SSRF defenses (blocking loopbacks, RFC 1918 subnets, cloud metadata endpoints, non-HTTP schemes).
 
 
 ### M11-T01: Multi-Stage Production Dockerfile
 - **Status**: Done
 - **PR**: #38
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Created `.dockerignore` to exclude local caches and virtual environments, and multi-stage `Dockerfile` with `python:3.12-slim` builder and runtime stages. Configured non-root system user `agentkit` (UID 1000), sandboxed file directory `/tmp/agentkit_sandbox`, healthcheck instruction probing `/health`, and uvicorn application entrypoint.
 
 ### M11-T02: Docker Compose Environment
 - **Status**: Done
 - **PR**: #39
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Created production `docker-compose.yml` declaring `postgres` (PostgreSQL 16 Alpine), `redis` (Redis 7 Alpine), and `api` services with volume persistence, networks, resource limits, healthchecks (`pg_isready`, `redis-cli ping`, `curl /health`), dependency conditions (`condition: service_healthy`), automated Alembic database migrations on boot (`alembic upgrade head && uvicorn ...`), and updated `.env.example` with compose networking defaults. Verified compose syntax with `docker compose config`.
 
 ### M11-T03: GitHub Actions CI Pipeline
 - **Status**: Done
 - **PR**: #40
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Created `.github/workflows/ci.yml` featuring two decoupled jobs with concurrency cancellation. `lint` runs on Python 3.12 executing `ruff check`, `ruff format --check`, and `mypy agentkit tests`. `test` runs across a Python matrix (`3.11`, `3.12`) with `postgres:16-alpine` and `redis:7-alpine` service containers with integrated healthchecks, runs database migrations via `alembic upgrade head`, and verifies code coverage with `pytest --cov=agentkit --cov-fail-under=85` and XML artifact uploads.
 
 ### M12-T01: Demo Database Seed & Multi-Tool End-to-End Demo
 - **Status**: Done
 - **PR**: #41
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Implemented `scripts/seed_demo_db.sql` populating `products` and `orders` tables with ANSI-standard SQL. Created `examples/demo.py` showcasing an autonomous agent solving a multi-step analytical problem by querying the database using `sql_readonly` and calculating revenue with sales tax via `calculator`. Supported deterministic offline execution using `FakeLLMClient` alongside live providers. Added integration tests in `tests/integration/test_demo.py`.
 
 ### M12-T02: AWS Deployment Guide
 - **Status**: Done
 - **PR**: #42
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Authored comprehensive single-node AWS EC2 production deployment guide in `docs/DEPLOY.md`. Covered architecture diagrams, EC2 hardware sizing recommendations, strict Security Group isolation rules (prohibiting public database/redis ingress), host Docker CE setup, dynamic AWS SSM Parameter Store secrets retrieval script, production systemd daemon unit (`agentkit.service`), automated TLS reverse proxy configurations for both Caddy and Nginx + Certbot, post-deployment health verification, and daily S3 database backup crons.
 
 ### M12-T03: Comprehensive Portfolio README
 - **Status**: Done
 - **PR**: #43
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Authored complete portfolio `README.md` with CI badge roster, architecture Mermaid flowchart illustrating the ReAct loop and dual-persistence layer, quickstart guide with Docker Compose and local setup, 10-line `@tool` creation tutorial with automatic schema introspection, third-party LLM provider extension guide (`AnthropicClient`), sample `StepTrace` JSON telemetry output, ADRs summary (ADR-001 through ADR-004), AWS production deployment references, testing guides, current limitations, and future roadmap.
 
 ### M13-T01: Real-Infrastructure Test Tier
@@ -350,43 +360,43 @@ This document tracks execution progress across all backlog tasks, including pull
 ### M13-T04: Gemini Tool Calling & Active Model Standard
 - **Status**: Done
 - **PR**: #45
-- **Commits**: 2
-- **Notes**: Resolved Gemini 2.x/3.x tool-calling incompatibility. Added `thought_signature: bytes | None = None` to neutral `ToolCall` model; captured candidate `thought_signature` from Gemini responses and forwarded it on subsequent conversation turns via `types.Part(function_call=..., thought_signature=...)`; resolved `Role.TOOL` function response names using assistant tool call history with `role="tool"`; standardized active default model to `gemini-2.0-flash` across application config, factory, `.env.example`, and `docker-compose.yml`; ensured `RedisMemoryStore` serializes messages with `mode="json"` for safe base64 bytes encoding.
+- **Commits**: 1
+- **Notes**: Resolved Gemini 2.x/3.x tool-calling incompatibility. Added `thought_signature: bytes | None = None` to neutral `ToolCall` model; captured candidate `thought_signature` from Gemini responses and forwarded it on subsequent conversation turns via `types.Part(function_call=..., thought_signature=...)`; resolved function-response names using assistant tool call history (the response role was later corrected to `user` by ADR-008); standardized the active default model across application config, factory, `.env.example`, and `docker-compose.yml`. **Corrections (AUDIT-16):** this entry originally named `gemini-2.0-flash` — the active default is `gemini-3.1-flash-lite` — and claimed `mode="json"` gave "safe base64 bytes encoding", which was false: it raises on non-UTF-8 bytes and broke the whole save. Signature persistence is now an explicit tagged base64 codec (ADR-013).
 
 ### M13-T05: Idempotent Demo Seeding & Docker Compose Auto-Seeding
 - **Status**: Done
 - **PR**: #46
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Completed SPEC Section 13 requirement for automated demo database seeding on `docker compose up`. Updated `scripts/seed_demo_db.sql` with `ON CONFLICT (id) DO NOTHING;` to guarantee idempotency across multiple runs; created standalone CLI and programmatic async seeding script `scripts/seed.py`; updated `Dockerfile` to copy `scripts/` to runtime container; updated `docker-compose.yml` migrations service to execute `alembic upgrade head && python scripts/seed.py`; delegated `examples/demo.py` seeding to `scripts.seed.seed_database`; added integration test in `tests/integration/test_seed.py`.
 
 ### AUD-01 / AUD-02 / AUD-03: Strict Infrastructure Resolution in API Dependencies
 - **Status**: Done
 - **PR**: #48
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Removed silent fallbacks to `InMemoryMemoryStore`, `InMemoryTraceSink`, and `FakeLLMClient` in `agentkit/api/deps.py`. API dependencies now strictly require live PostgreSQL and Redis services, raising `ServiceUnavailableError` (HTTP 503) if absent. `get_llm_client` now instantiates the configured provider directly and allows authentication or configuration errors to surface rather than silently masking them with a mock client. Added integration tests in `tests/integration/test_api_deps_strict.py`.
 
 ### AUD-04: Wire RetryingLLMClient with MAX_RETRIES in LLM Factory
 - **Status**: Done
 - **PR**: #49
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Added `MAX_RETRIES: int = Field(default=3, ge=0)` to application `Settings`. Updated `create_llm_client_from_settings` in `agentkit/llm/factory.py` to wrap live providers (`gemini`, `openai`) with `RetryingLLMClient` when `MAX_RETRIES > 0`, applying exponential backoff and jitter to transient 429/5xx errors. Unit tests in `tests/unit/test_llm_factory.py`.
 
 ### AUD-05 / AUD-06: Strict Demo Mode & README Configuration Cleanup
 - **Status**: Done
 - **PR**: #50
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Updated `examples/demo.py` so that `build_llm` raises an explicit `ValueError` when running in live mode without the required API keys rather than silently falling back to `FakeLLMClient`. Configured `create_llm_client` invocation in demo with explicit API keys from settings. Removed unused configuration keys (`JWT_SECRET` and `ENVIRONMENT`) from `README.md` sample `.env` snippet. Added test in `tests/integration/test_demo.py`.
 
 ### AUD-07: Gemini Multi-Turn Role Specification & Active Model Standard
 - **Status**: Done
 - **PR**: #51
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Resolved upstream Google Gemini API requirement for multi-turn function responses: updated tool execution output message to `role="user"` wrapping `types.Part.from_function_response(...)`. Updated default model to `gemini-3.7-flash` across application settings, factory, adapter, docker-compose, and `.env.example`.
 
 ### AUD-08: Expose Configurable Timeout and Model Upgrades
 - **Status**: Done
 - **PR**: #52
-- **Commits**: 2
+- **Commits**: 1
 - **Notes**: Exposed `RUN_TIMEOUT_S` in `docker-compose.yml` to support multi-step agent runs across network latency. Updated candidate model probe and unit tests.
 
 ### AUD-09: Live End-to-End Verification & Documentation Proof
@@ -407,3 +417,75 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: #47
 - **Commits**: 3
 - **Notes**: Remediated 17 findings from a full-codebase audit, rebased onto the AUD-01/AUD-04/AUD-05 follow-ups. Critical: removed the `ak_test_key_12345` default from `Settings.API_KEYS` and made the field required; replaced the `FakeLLMClient` fallback in `get_llm_client` with a `ServiceUnavailableError` (503) boundary around provider construction; kept the AUD-04 factory-level `RetryingLLMClient` wrapping and made it configurable through new `LLM_MAX_RETRIES`/`LLM_RETRY_BASE_DELAY_S`/`LLM_RETRY_MAX_DELAY_S` settings; made the per-request `Agent` assembly's override explicit as `app.state.agent_override`; forwarded `get_run_trace`/`list_runs` through `TieredMemoryStore`; moved `http_fetch` DNS off the event loop with `asyncio.to_thread`, added a post-connect `server_addr` check against the validated addresses to close the DNS-rebinding TOCTOU window, and replaced full-body buffering with a byte-budgeted stream; replaced the rate limiter's non-scripting fallback with `WATCH`/`MULTI`/`EXEC`, leaving the AUD-10 in-memory fallback for Redis outages intact. Moderate: corrected the `RedisMemoryStore.truncate_messages` off-by-one that returned `max_messages + 1` entries when a system prompt was present; switched generated `tool_call_id`s to full UUIDs; wrapped response parsing in both LLM adapters inside the error boundary so malformed responses and malformed tool-argument JSON raise `LLMProviderError`; guarded `RetryingLLMClient.__getattr__` against recursion on a partially constructed instance; sanitized `/health` details so the unauthenticated endpoint no longer echoes driver error strings; made `sql_readonly` mask string literals and quoted identifiers before its keyword scan, allow `#>`/`#>>`/`#-`, apply the row limit in SQL and push `statement_timeout` to PostgreSQL. Minor: stopped logging raw run goals at INFO (length only, content at DEBUG); replaced `split(";")` in `scripts/seed.py` with a statement-aware splitter handling literals, comments and dollar-quotes; bounded calculator exponentiation by result bit length. Added `tests/unit/test_audit_regressions.py` and a real-Redis concurrency regression test pinning the fallback fix. Recorded in ADR-009, ADR-010, ADR-011. Suite: 298 passed, 25 skipped; coverage 92.86% on core/tools/llm; `ruff check`, `ruff format --check` and `mypy agentkit tests` all clean.
+
+### AUDIT-01 / AUDIT-02: Read-Only SQL Isolation and Row Cap
+- **Status**: Done
+- **PR**: stacked on `main` (landed with the AUDIT remediation stack)
+- **Commits**: 1
+- **Notes**: `sql_readonly` no longer runs as the application superuser. It connects with `DATABASE_READONLY_URL` (dedicated role, `SELECT`-only, `default_transaction_read_only = on`), fails closed when that URL is absent, issues `SET TRANSACTION READ ONLY` per session and refuses a superuser connection. Provisioning lives in `scripts/init_readonly_role.py` and is idempotent. Defence in depth: the literal masker now understands `$tag$…$tag$` dollar quotes and `E'…'` escapes, so `SELECT $$'$$ INTO x` and `SELECT E'\''; DROP TABLE runs; --'` are rejected; a function denylist blocks `pg_read_file`, `pg_read_binary_file`, `pg_ls_dir`, `setval`, `nextval`, `query_to_xml`, `lo_import`/`lo_export`, `dblink_exec`, `pg_terminate_backend`, `pg_cancel_backend` and `pg_logical_emit_message`. The row cap is enforced in SQL: `LIMIT ALL`, `LIMIT NULL` and oversized limits are clamped to the configured maximum, smaller caller bounds are preserved, a subquery `LIMIT` is not mistaken for the outer bound, and `FOR UPDATE` falls back to a wrapped subquery. Covered by `tests/unit/test_sql_isolation.py` and `tests/real/test_sql_isolation_real.py` (runs against live PostgreSQL, asserts the role is not a superuser, writes are refused, and the tool reads end-to-end through the dedicated role). Recorded in ADR-012.
+
+### AUDIT-18: Compose Datastore Hardening
+- **Status**: Done
+- **PR**: stacked on `fix/sql-readonly-isolation` — PR #84
+- **Commits**: 1
+- **Notes**: `docker-compose.yml` no longer publishes PostgreSQL or Redis with weak/no credentials. Both datastores bind loopback by default (`POSTGRES_BIND`/`REDIS_BIND`, `0.0.0.0` is a documented opt-in), `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD` and `REDIS_PASSWORD` are required by compose interpolation instead of defaulting to `postgres`/empty, Redis starts with `redis-server --requirepass` sourced from the environment and its healthcheck authenticates, and the api service's `REDIS_URL` carries the password. `scripts/check_deploy_credentials.py` runs ahead of migrations and fails closed on image defaults, documented placeholders, short passwords, a read-only role equal to the application role, a shared password, a missing `DATABASE_READONLY_URL` or a passwordless `REDIS_URL`. The migrations service also provisions the read-only role after seeding. Verified with `docker compose config` (required-variable failure), a live Redis container (`NOAUTH` unauthenticated, `PONG` authenticated, healthy) and the guard CLI. Documented in `docs/DEPLOY.md`.
+
+### AUDIT-03 / AUDIT-08 / AUDIT-09: Persistence Integrity
+- **Status**: Done
+- **PR**: stacked on `chore/compose-hardening` — PR #84
+- **Commits**: 1
+- **Notes**: Persistence is no longer best-effort. `Agent.run` logs and raises the new `PersistenceError` (HTTP 503, code `PERSISTENCE_ERROR`) when `create_run` fails, so the loop never executes for a run nobody can read back; a failed final `update_run` is retried once with `status=failed` so a transient fault cannot leave the row stuck in `running`. `POST /runs` no longer synthesises a 200 from the in-memory result when the store cannot return the record — it raises `PersistenceError`, and `GET /runs/{id}` still returns 404 for a run that was never persisted. `PostgresTraceSink` no longer fabricates a placeholder `Run` (`goal="Agent Execution"`, `session_id=None`, `status="running"`); it logs an error and drops the step when the parent row is missing, leaving `create_run` as the only writer of run rows. `session_id` is bounded at the request boundary (`max_length=255`, shared with the `String(255)` column through `SESSION_ID_MAX_LENGTH`), so an over-long id is a 422 before any agent work instead of a swallowed insert error. Covered by `tests/integration/test_persistence_integrity.py`, `tests/unit/test_pg_trace.py` and updated live-PostgreSQL tests in `tests/real/test_postgres_real.py`.
+
+### AUDIT-04 / AUDIT-10 / AUDIT-11: Session History Durability
+- **Status**: Done
+- **PR**: stacked on `fix/persistence-integrity` — PR #84
+- **Commits**: 1
+- **Notes**: Gemini `thought_signature` is persisted as an explicitly tagged base64 object (`{"base64": "..."}`) and decoded by a `ToolCall` field validator, so arbitrary binary round-trips byte-for-byte instead of raising `UnicodeDecodeError` inside `model_dump(mode="json")` and aborting the whole save; legacy UTF-8-encoded signatures remain readable. A corrupt or unreadable history now raises the new `SessionHistoryError` (503) with an ERROR log carrying the session id, instead of being read as an empty conversation that the next run overwrote — the agent also marks the run failed rather than leaving it `running`. `SESSION_MAX_MESSAGES` (default 40) is wired through `get_memory_store`, documents in `.env.example`/`docs/SPEC.md`, and `RedisMemoryStore.truncate_messages` advances its cut point past leading tool results so the kept history is always provider-valid. Covered by `tests/unit/test_session_history.py` (binary round trips, tagged encoding, legacy read, corrupt payload, agent fail-closed behaviour, every truncation cut point, storage bound, settings wiring).
+
+### AUDIT-05 / AUDIT-06: Gemini Wire-Format Fidelity
+- **Status**: Done
+- **PR**: stacked on `fix/session-history` — PR #84
+- **Commits**: 1
+- **Notes**: Consecutive `tool` messages are now grouped into one `Content(role="user")` with one `function_response` part per call, satisfying Gemini's requirement that the response turn match the call turn part-for-part; two parallel calls to the same tool are emitted in call order with matching ids. The provider's `FunctionCall.id` is preserved end to end instead of being replaced by a random UUID, `FunctionResponse.id` is populated, and the outbound `FunctionCall` carries the id too. Response parsing skips `Part.thought=True` parts, so internal reasoning no longer leaks into `LLMResponse.text`, the persisted assistant turn or `final_answer`, while a thought part that carries a function call still yields that call and its signature; the `raw_response.text` fallback is now only used when the response had no inspectable parts. Covered by `tests/unit/test_gemini_wire_format.py`. Recorded in ADR-014.
+
+### AUDIT-07: Provider Refusal Status
+- **Status**: Done
+- **PR**: stacked on `fix/gemini-adapter` — PR #84
+- **Commits**: 1
+- **Notes**: `LLMResponse` gained `refusal_reason`, populated from Gemini's `prompt_feedback.block_reason` (with `block_reason_message` when present) and from candidate `finish_reason` values in {SAFETY, RECITATION, PROHIBITED_CONTENT, BLOCKLIST, SPII, IMAGE_SAFETY}, and from OpenAI's `finish_reason == "content_filter"` or a non-empty `message.refusal`. `RunStatus` gained `refused`; the agent now maps a refusal to that status with the provider's reason, and an empty completion (no text, no tool calls) to `failed` with an explicit "Provider returned an empty response" reason, so a `succeeded` run always carries a non-empty answer. The `raw_response.text` fallback is skipped for refusals, since it raises on blocked prompts and would otherwise re-add reasoning text. `POST /runs` surfaces the refusal status and reason. Covered by `tests/unit/test_provider_refusals.py`. Recorded in ADR-015.
+
+### AUDIT-12 / AUDIT-13 / AUDIT-14: Tool Schemas, Client Lifecycle and Settings
+- **Status**: Done
+- **PR**: stacked on `fix/provider-refusal-status` — PR #84
+- **Commits**: 1
+- **Notes**: Generated tool schemas now carry Pydantic's `$defs` (plus `additionalProperties`, per-property titles and defaults) so every `$ref` resolves inside the emitted document; the redundant top-level `title` is dropped and simple built-in schemas stay byte-identical. The LLM provider client is built once per application on `app.state.managed_llm_client` and closed by the lifespan (`aio.aclose()` for Gemini, `close()` for OpenAI, forwarded through `RetryingLLMClient`), instead of one unclosed client per request; explicit `app.state.llm_client` overrides remain caller-owned. `TOOL_OUTPUT_MAX_CHARS` is wired into `AgentConfig` and the compose `api` service now forwards every setting documented in `.env.example` (`MAX_STEPS`, `TOOL_TIMEOUT_S`, `TOOL_OUTPUT_MAX_CHARS`, `SESSION_TTL_S`, `SESSION_MAX_MESSAGES`, `RATE_LIMIT_PER_MIN`, `SEARCH_API_KEY`, `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_DELAY_S`, `LLM_RETRY_MAX_DELAY_S`). Covered by `tests/unit/test_tools_resources_config.py`, including a check that every documented setting appears in compose. Recorded in ADR-016.
+
+### AUDIT-15 / AUDIT-17: Loop Detection and API Key Auth
+- **Status**: Done
+- **PR**: stacked on `fix/tools-resources-config` — PR #84
+- **Commits**: 1
+- **Notes**: The duplicate-tool detector now counts `(tool, canonical-args)` occurrences inside a configurable sliding window (`duplicate_tool_call_window`, default 20) instead of remembering only the previous call, so alternating patterns such as `calculator(1)`, `calculator(2)`, `calculator(1)`, … abort the run in a few steps rather than at `max_steps`; the repeat threshold keeps its original field name and existing consecutive-repeat behaviour. API key verification strips the presented key the same way configured keys are and compares every configured key with `hmac.compare_digest` without short-circuiting, returning the normalised key used for rate limiting and logging. Covered by `tests/unit/test_loop_detector_and_auth.py`, and `tests/unit/test_agent_loop_detector.py` was updated where it encoded the old consecutive-only expectation. Recorded in ADR-017.
+
+### AUDIT-16: Documentation Claim Corrections
+- **Status**: Done
+- **PR**: stacked on `fix/agent-loop-and-auth` — PR #84
+- **Commits**: 1
+- **Notes**: Corrected the claims the code did not support. `README.md` no longer describes `sql_readonly` as AST-validated and instead states the dedicated-role control and the lexer's actual limits. `docs/ARCHITECTURE.md` gained the real default model (`gemini-3.1-flash-lite`) and one-client-per-application note; its read-only SQL guardrail already describes the implemented role, session and row-cap controls. `docs/AUDIT.md` downgrades the SQL and Gemini component rows from an unqualified PASS to "PASS (after AUDIT-01/02)" / "PASS (after AUDIT-04/05/06)" and gains a remediation table indexed by issue number for all 18 findings. ADR-006 is annotated "superseded in part by ADR-008 and ADR-013" with inline corrections for the false base64 claim and the stale `gemini-2.0-flash` model id; the matching PROGRESS table row, its notes and `docs/PLAN.md` are aligned. `tests/unit/test_docs_accuracy.py` guards the default model name, the SQL wording, the ADR-006 annotation, the PASS qualifiers and the presence of all 18 findings in the remediation table.
+
+### AUDIT-18-FU: Real-Infra Redis Authentication
+- **Status**: Done
+- **PR**: stacked on `docs/correct-audit-claims` — PR #84
+- **Commits**: 1
+- **Notes**: The compose hardening in AUDIT-18 started Redis with `--requirepass`, but nothing outside compose consumed `REDIS_PASSWORD`, so the live tier broke: `tests/conftest.py` fell back to a credential-less `REDIS_TEST_URL`/`REDIS_URL` and every Redis fixture failed with `HELLO must be called with the client already authenticated` (18 errors). `REDIS_PASSWORD` is now a documented `Settings` field and is authoritative: `apply_redis_password` embeds it into a passwordless `redis://` or `rediss://` URL (percent-encoding reserved characters, leaving an explicit username/password, non-Redis URLs and malformed URLs untouched) and a `model_validator` applies it to `REDIS_URL`, so the API and the suite resolve the same authenticated URL and the secret need not be repeated in the URL string. The suite reads `REDIS_PASSWORD` from the environment first and falls back to `Settings`, which is how a password defined only in `.env` reaches pytest (pydantic-settings reads the file into the model, not into `os.environ`); an explicit `REDIS_TEST_URL` still wins, so CI is unchanged. Covered by `tests/unit/test_real_infra_urls.py`. Documented in `README.md` (test-tier commands) and `docs/DEPLOY.md` (credential resolution). Recorded in ADR-018.
+
+### AUDIT-19: Datastore Credentials Interpolated Into URLs
+- **Status**: Done
+- **PR**: stacked on `fix/real-infra-redis-auth` — PR #84
+- **Commits**: 1
+- **Notes**: Compose built `DATABASE_URL` and `DATABASE_READONLY_URL` by pasting `${POSTGRES_PASSWORD}` and `${POSTGRES_READONLY_PASSWORD}` into a URL, and `REDIS_URL` the same way. The documented generator is `openssl rand -base64 24`, which emits `/`, `+` and `=`: an RFC 3986 parser ends the authority at the first `/`, so the rest of the password becomes the path, and SQLAlchemy's `make_url` truncates the secret at an `@`. Credentials are now configured as components (`POSTGRES_HOST`/`PORT`/`USER`/`PASSWORD`/`DB` plus `POSTGRES_READONLY_*`), and `build_postgres_url()` renders the URL through SQLAlchemy's `URL.create()` so every component is escaped; `resolve_postgres_url()` is the single precedence rule — an explicit `DATABASE_URL`/`DATABASE_READONLY_URL` wins verbatim, then the components, then the documented development default. `Settings` applies it in its validator and `scripts/check_deploy_credentials.py` calls the same functions, so the guard audits exactly the URLs the application uses (and no longer demands a password inside `REDIS_URL`, since `REDIS_PASSWORD` supplies it). Compose passes components only and fixes the datastore host/port to the service names, so a host-side `.env` pointing at `localhost` cannot leak into a container. `.env.example`, README, `docs/DEPLOY.md` (including the SSM-generated `.env`) and `docs/SPEC.md` describe the component form instead of hand-built URLs. Covered by `tests/unit/test_database_url_components.py` (escaping and round-trip, precedence, dotenv input, guard parity, compose and `.env.example` shape). Recorded in ADR-019.
+
+### AUDIT-20: Reused Read-Only Role Keeps Its Privileges
+- **Status**: Done
+- **PR**: stacked on `fix/pg-url-credentials` — PR #84
+- **Commits**: 1
+- **Notes**: `scripts/init_readonly_role.py` changed only the password of a role that already existed, so a pre-existing `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` role — or one that was a member of `pg_read_server_files` — kept everything the documented `SELECT`-only contract says it does not have. Provisioning now restricts first: `restriction_statements()` revokes those attributes and all privileges on the database, the `public` schema, tables, sequences and functions, `_revoke_memberships()` drops every direct membership, and only then are `CONNECT`/`USAGE`/`SELECT` granted back. It refuses a role that owns the target database (an owner can grant itself anything) and `_assert_restricted()` verifies the outcome, raising `ReadonlyRoleConfigError` rather than reporting a privileged role as provisioned. The tool checks the same properties per session in one round trip — `rolsuper`, `rolbypassrls` and membership of `pg_read_server_files`, `pg_write_server_files`, `pg_execute_server_program`, `pg_signal_backend`, `pg_monitor` or `pg_maintain`, resolved through `pg_has_role` so indirect membership counts — and refuses before the query runs. The statement lexer also re-exposes plain quoted identifiers to the function denylist, because PostgreSQL resolves `SELECT "pg_read_file"(…)` to the same built-in; keyword scans keep masking identifiers so `SELECT "delete" FROM t` stays valid. Covered by `tests/unit/test_readonly_role_provisioning.py`, new payloads in `tests/unit/test_sql_isolation.py`, and `tests/real/test_sql_isolation_real.py::test_reused_role_has_its_privileges_stripped`, which grants `CREATEDB` plus `pg_read_server_files` to the role and asserts provisioning strips both. Recorded in ADR-020.

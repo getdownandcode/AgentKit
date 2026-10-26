@@ -5,10 +5,14 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Required: no default password. Compose refuses to start the stack instead of
+      # publishing a database with database credentials anyone can guess.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set to a non-default value}
       POSTGRES_DB: ${POSTGRES_DB:-agentkit}
     ports:
-      - "5432:5432"
+      # Loopback-only by default: nothing outside this host can reach the database.
+      # Set POSTGRES_BIND=0.0.0.0 deliberately if you need remote access (see docs/DEPLOY.md).
+      - "${POSTGRES_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,12 +28,20 @@ services:
     image: redis:7-alpine
     container_name: agentkit-redis
     restart: unless-stopped
+    environment:
+      # Read inside the container by the command and healthcheck below, so the password is
+      # never part of the process arguments that `docker inspect` would expose.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set so Redis is not unauthenticated}
+    # `--requirepass` with an empty value would silently accept unauthenticated clients, so
+    # the variable is required by the interpolation above rather than defaulted to empty.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$${REDIS_PASSWORD}\""]
     ports:
-      - "6379:6379"
+      # Loopback-only by default; see POSTGRES_BIND above for the deliberate opt-in.
+      - "${REDIS_BIND:-127.0.0.1}:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -43,16 +55,36 @@ services:
       dockerfile: Dockerfile
     container_name: agentkit-migrations
     restart: "no"
-    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py"]
+    # The credential guard runs first: a placeholder or default secret stops the stack before
+    # any schema change, rather than surfacing as an insecure deployment. The read-only role
+    # is provisioned after migrations so its SELECT grants cover the real tables.
+    command:
+      - "sh"
+      - "-c"
+      - "python scripts/check_deploy_credentials.py && alembic upgrade head && python scripts/seed.py && python scripts/init_readonly_role.py"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
+      # Credentials travel as components, never pasted into a URL. A password from
+      # `openssl rand -base64 24` contains '/', '+' and '=', and a raw '/' ends the URL
+      # authority: the rest of the password becomes the path and the connection targets a
+      # database nobody created. Settings and the guard escape each component themselves,
+      # so any generated password works.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-agentkit}
+      - POSTGRES_READONLY_USER=${POSTGRES_READONLY_USER:-agentkit_readonly}
+      - POSTGRES_READONLY_PASSWORD=${POSTGRES_READONLY_PASSWORD:?POSTGRES_READONLY_PASSWORD must be set for the dedicated read-only role}
       # Settings validation requires API_KEYS, and both alembic and the seed script
       # construct Settings. Passed through so the compose stack fails closed here,
       # with the same validation error, rather than in the api service.
       - API_KEYS=${API_KEYS:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     networks:
       - agentkit-net
 
@@ -72,10 +104,35 @@ services:
       migrations:
         condition: service_completed_successfully
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/agentkit}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      # Same component form as the migrations service; see the comment there. Inside the
+      # stack the service names are authoritative, so a .env DATABASE_URL pointing at
+      # localhost cannot leak in and break the container.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-agentkit}
+      # The sql_readonly tool refuses to run without a dedicated role, so the same
+      # credentials the migrations service provisioned are wired into the API here.
+      - POSTGRES_READONLY_USER=${POSTGRES_READONLY_USER:-agentkit_readonly}
+      - POSTGRES_READONLY_PASSWORD=${POSTGRES_READONLY_PASSWORD}
+      # Credential-less URL plus the password: Settings escapes the secret into the URL.
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - FILE_TOOL_BASE_DIR=/tmp/agentkit_sandbox
+      # Every setting documented in .env.example is forwarded, so a containerised deployment
+      # does not silently run with defaults that differ from the documented ones.
       - RUN_TIMEOUT_S=${RUN_TIMEOUT_S:-60}
+      - MAX_STEPS=${MAX_STEPS:-10}
+      - TOOL_TIMEOUT_S=${TOOL_TIMEOUT_S:-15}
+      - TOOL_OUTPUT_MAX_CHARS=${TOOL_OUTPUT_MAX_CHARS:-2000}
+      - SESSION_TTL_S=${SESSION_TTL_S:-3600}
+      - SESSION_MAX_MESSAGES=${SESSION_MAX_MESSAGES:-40}
+      - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-30}
+      - SEARCH_API_KEY=${SEARCH_API_KEY:-}
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
+      - LLM_RETRY_BASE_DELAY_S=${LLM_RETRY_BASE_DELAY_S:-0.5}
+      - LLM_RETRY_MAX_DELAY_S=${LLM_RETRY_MAX_DELAY_S:-10}
       # No default key. An unset or empty API_KEYS leaves the api service to fail at
       # startup on Settings validation rather than running with a published key.
       # Compose keeps ${VAR:-} so `down`, `ps` and `logs` still work without it.

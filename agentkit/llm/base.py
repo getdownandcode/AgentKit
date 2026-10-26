@@ -86,6 +86,13 @@ class LLMResponse(BaseModel):
         default_factory=TokenUsage,
         description="Token consumption metadata.",
     )
+    refusal_reason: str | None = Field(
+        default=None,
+        description=(
+            "Set when the provider refused, filtered or blocked the response. The agent maps "
+            "it to RunStatus.REFUSED instead of treating an empty answer as success."
+        ),
+    )
     raw_metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Raw provider-specific metadata and response headers.",
@@ -94,6 +101,15 @@ class LLMResponse(BaseModel):
 
 class LLMClient(ABC):
     """Abstract interface defining required behavior for all LLM provider adapters."""
+
+    async def aclose(self) -> None:
+        """Release provider resources held by this client.
+
+        Provider clients own HTTP transports and connection pools, so they must be closed
+        when the application shuts down rather than left to garbage collection. The default
+        is a no-op for in-process implementations such as the scripted fake client.
+        """
+        return None
 
     @abstractmethod
     async def chat(

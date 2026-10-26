@@ -43,7 +43,8 @@ class DuplicateToolCallLoopError(AgentKitError):
 
     def __init__(self, tool_name: str, count: int) -> None:
         super().__init__(
-            f"Detected duplicate tool call loop: '{tool_name}' called {count} consecutive times with identical arguments.",
+            f"Detected duplicate tool call loop: '{tool_name}' called {count} times with "
+            "identical arguments in a short window.",
             code="DUPLICATE_TOOL_CALL_LOOP",
         )
         self.tool_name = tool_name
@@ -162,6 +163,33 @@ class ServiceUnavailableError(AgentKitError):
             code="SERVICE_UNAVAILABLE",
         )
         self.service = service
+
+
+class PersistenceError(ServiceUnavailableError):
+    """Raised when a run or its conversation history could not be persisted.
+
+    Persistence is not best-effort: a run the caller cannot read back must not be reported as
+    a success. The error maps to HTTP 503 through :func:`map_agentkit_error_status`, because
+    the cause is the backing store rather than the request.
+    """
+
+    def __init__(self, message: str, run_id: str | None = None) -> None:
+        super().__init__("persistence", message)
+        self.code = "PERSISTENCE_ERROR"
+        self.run_id = run_id
+
+
+class SessionHistoryError(PersistenceError):
+    """Raised when a session's stored conversation history cannot be read.
+
+    A run must not continue on a silently empty history: it would answer without the prior
+    context and then overwrite the stored conversation with the shortened one.
+    """
+
+    def __init__(self, message: str, session_id: str | None = None) -> None:
+        super().__init__(message)
+        self.code = "SESSION_HISTORY_ERROR"
+        self.session_id = session_id
 
 
 # Aliases for convenience

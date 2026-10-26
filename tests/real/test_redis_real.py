@@ -13,7 +13,7 @@ from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
 from agentkit.api.ratelimit import RateLimiter
-from agentkit.core.errors import RateLimitExceededError
+from agentkit.core.errors import RateLimitExceededError, SessionHistoryError
 from agentkit.core.types import Role
 from agentkit.llm.base import Message
 from agentkit.memory.redis_store import RedisMemoryStore
@@ -102,12 +102,16 @@ async def test_clear_session_deletes_key(real_redis: Redis[str]) -> None:
     assert await real_redis.exists("session:sess-clear:messages") == 0
 
 
-async def test_corrupt_payload_degrades_gracefully(real_redis: Redis[str]) -> None:
-    """A non-JSON value must not raise out of the read path."""
+async def test_corrupt_payload_is_surfaced_not_swallowed(real_redis: Redis[str]) -> None:
+    """A non-JSON value must raise rather than read as an empty conversation."""
     store = RedisMemoryStore(client=real_redis, ttl_s=300)
     await real_redis.set("session:sess-corrupt:messages", "{not-json")
 
-    assert await store.get_messages("sess-corrupt") == []
+    with pytest.raises(SessionHistoryError, match="sess-corrupt"):
+        await store.get_messages("sess-corrupt")
+
+    # The stored value must survive the failed read: it is corrupt, not deleted.
+    assert await real_redis.get("session:sess-corrupt:messages") == "{not-json"
 
 
 async def test_rate_limiter_blocks_at_limit(real_redis: Redis[str]) -> None:

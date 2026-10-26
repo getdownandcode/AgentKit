@@ -56,6 +56,7 @@ AgentKit follows clean architecture principles:
    - Houses built-in sandboxed tools (`calculator`, `sql_readonly`, `read_file`, `http_fetch`, `web_search`).
 4. **LLM Adapter Layer (`agentkit/llm`)**:
    - Converts internal domain message types (`Message`, `ToolCall`, `LLMResponse`) to/from provider-specific SDK formats (Google Gemini, OpenAI).
+   - The default model is `gemini-3.1-flash-lite` (`Settings.LLM_MODEL`); one provider client is built per application and closed on shutdown.
    - Handles exponential backoff retries with jitter for transient provider failures.
 5. **Memory & Persistence Layer (`agentkit/memory`, `agentkit/db`)**:
    - Redis store: Ephemeral conversation history per `session_id` with TTL, plus rate limiting counters.
@@ -112,7 +113,7 @@ sequenceDiagram
 ## 4. Security & Safety Guardrails
 
 - **AST Calculator**: Only safe AST node evaluations are allowed. `eval()` and `exec()` are strictly banned.
-- **Read-Only SQL**: Queries are parsed and validated to ensure only single `SELECT` statements are executed. DDL/DML, multi-statement injection, and comment trickery are rejected. DB role is read-only.
+- **Read-Only SQL**: The `sql_readonly` tool connects with a dedicated non-superuser role (`DATABASE_READONLY_URL`) whose sessions default to `default_transaction_read_only`, and every session issues `SET TRANSACTION READ ONLY`; a superuser connection, a role with `BYPASSRLS` and a role that inherits a privileged predefined role (`pg_read_server_files`, `pg_execute_server_program`, `pg_signal_backend`, …) are all refused, and a missing URL fails closed instead of borrowing the application role. The provisioning script strips those privileges from a reused role and verifies the result. On top of that, a statement lexer accepts only a single `SELECT`/`WITH` statement and rejects DDL/DML, multi-statement injection, comment trickery, and privileged built-ins such as `pg_read_file`, `setval` or `query_to_xml` — including when the name is written as a quoted identifier (`SELECT "pg_read_file"(…)`). Output is bounded in SQL: an existing `LIMIT ALL`/oversized `LIMIT` is clamped to the configured maximum.
 - **Path Traversal Protection**: `read_file` validates resolved canonical paths against a configured root directory (`FILE_TOOL_BASE_DIR`). Symlink escapes outside base dir are rejected.
 - **SSRF Protection**: `http_fetch` blocks IPv4/IPv6 private address spaces, loopback (`127.0.0.1`), link-local (`169.254.169.254`), and non-HTTP/HTTPS protocols.
 - **Untrusted Tool Outputs**: Tool outputs are always fed back as distinct tool-role messages, never interpolated into the system prompt, mitigating prompt injection.

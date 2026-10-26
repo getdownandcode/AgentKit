@@ -1,5 +1,6 @@
 """OpenAI LLM provider adapter using the official openai SDK."""
 
+import inspect
 import json
 import logging
 import os
@@ -43,6 +44,14 @@ class OpenAIClient(LLMClient):
             raise AuthenticationError(
                 "OpenAI API key not configured. Set OPENAI_API_KEY environment variable or pass api_key."
             )
+
+    async def aclose(self) -> None:
+        """Close the underlying AsyncOpenAI client and its connection pool."""
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
 
     async def chat(
         self,
@@ -142,6 +151,7 @@ class OpenAIClient(LLMClient):
             choice_message = choice.message
             text = choice_message.content or ""
             tool_calls: list[ToolCall] = []
+            refusal_reason = _openai_refusal_reason(choice, choice_message)
 
             if getattr(choice_message, "tool_calls", None):
                 for tc in choice_message.tool_calls:
@@ -207,5 +217,23 @@ class OpenAIClient(LLMClient):
             text=text,
             tool_calls=tool_calls,
             usage=TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+            refusal_reason=refusal_reason,
             raw_metadata=metadata,
         )
+
+
+def _openai_refusal_reason(choice: Any, choice_message: Any) -> str | None:
+    """Return why OpenAI refused or filtered the response, or None.
+
+    A content filter and an explicit refusal both produce a normal 200 response whose content
+    is empty or absent. Without inspecting them the agent reports a successful run with an
+    empty answer.
+    """
+    finish_reason = getattr(choice, "finish_reason", None)
+    if isinstance(finish_reason, str) and finish_reason == "content_filter":
+        return "OpenAI filtered the response (content_filter)."
+
+    refusal = getattr(choice_message, "refusal", None)
+    if isinstance(refusal, str) and refusal.strip():
+        return f"OpenAI refused the request: {refusal.strip()}"
+    return None
