@@ -103,3 +103,4 @@ fixed on top of the same stack rather than in a separate follow-up.
 | Finding | Severity | Branch | Resolution |
 |:---|:---:|:---|:---|
 | AUDIT-19 Datastore credentials interpolated into URLs | High/Deployment | `fix/pg-url-credentials` | Credentials configured as components and percent-encoded by `URL.create()`; an explicit URL still wins |
+| AUDIT-20 Reused read-only role keeps inherited privileges | High | `fix/readonly-role-privileges` | Provisioning revokes attributes, memberships and non-`SELECT` grants and verifies the result; the tool also refuses `BYPASSRLS` and privileged memberships per session |

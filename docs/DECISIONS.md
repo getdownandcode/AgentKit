@@ -306,3 +306,20 @@ This log records significant architectural, technical, and design decisions made
   - A deployment that pins a full URL is unaffected, and the compose stack no longer depends on shell-style nested interpolation, which is easier to reason about and to render with `docker compose config`.
   - The `.env.example` and README no longer teach a hand-built URL containing a password, so the unsafe pattern is not the first thing a new deployment copies.
   - This supersedes the last consequence of ADR-018: the credential guard no longer demands a password inside `REDIS_URL`, because a credential-less URL plus `REDIS_PASSWORD` is the documented, tested form.
+
+---
+
+## ADR-020: A Reused Read-Only Role Is Restricted and Verified
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**: `scripts/init_readonly_role.py` created the role or, when it already existed, only changed its password: `ALTER ROLE %I WITH LOGIN PASSWORD %L`. Everything the role had accumulated stayed in place. A role that was a `SUPERUSER`, held `CREATEDB`, owned `INSERT`/`CREATE` grants, or was a member of `pg_read_server_files` therefore kept far more than the `SELECT`-only contract the docs promise. Membership is the sharpest case: `SELECT "pg_read_file"('/etc/passwd')` passes the statement lexer (it is a legitimate read of a privileged built-in, and the masker blanks quoted identifiers) and only the role's privileges stand between the agent and the host filesystem. `_enforce_read_only_session` rejected superusers and nothing else.
+- **Decision**:
+  - Provisioning treats an existing role as untrusted input. `restriction_statements()` revokes `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` and `BYPASSRLS`, then revokes all privileges on the database, the `public` schema, all tables, sequences and functions; `_revoke_memberships()` drops every direct membership; only then are `CONNECT`, `USAGE` and `SELECT` granted back.
+  - The script refuses a role that owns the target database, because an owner can grant itself anything, and it verifies the outcome with `_assert_restricted()`, raising `ReadonlyRoleConfigError` instead of reporting a role as provisioned when it is not.
+  - The tool checks the same properties per session, in one round trip: `rolsuper`, `rolbypassrls`, and membership in `pg_read_server_files`, `pg_write_server_files`, `pg_execute_server_program`, `pg_signal_backend`, `pg_monitor` or `pg_maintain`, resolved through `pg_has_role` so indirect membership counts. Any hit is a `ToolSecurityError` before the query runs.
+  - The statement lexer re-exposes plain quoted identifiers to the function denylist (and only there), because PostgreSQL resolves `"pg_read_file"` to the same function as `pg_read_file`. Keyword scans keep masking identifiers, so `SELECT "delete" FROM t` stays valid.
+- **Consequences**:
+  - Re-running the provisioner is safe and now converges a pre-existing role to read-only instead of inheriting its history.
+  - A deployment that cannot restrict its role fails loudly at provisioning time, and one that skips provisioning still fails closed at query time.
+  - `REVOKE ALL … ON ALL FUNCTIONS` also drops function `EXECUTE` grants the role may have relied on; the tool only needs `SELECT`, and a function call in a projection still works through `PUBLIC` execute grants.

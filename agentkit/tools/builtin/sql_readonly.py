@@ -7,7 +7,8 @@ standing between an agent and the application database:
    a dedicated non-superuser role whose ``default_transaction_read_only`` is ``on``. The tool
    refuses to run when that URL is absent and never falls back to the application's own
    ``DATABASE_URL``; each session additionally issues ``SET TRANSACTION READ ONLY`` and
-   rejects a superuser connection before executing anything.
+   rejects a superuser connection, a ``BYPASSRLS`` role and a role that inherits a privileged
+   predefined role before executing anything.
 2. **Statement validation (defence in depth).** Only a single ``SELECT``/``WITH`` statement is
    accepted, comments are rejected, side-effecting and file-reading built-ins are denied, and
    the output is bounded in SQL so the server cannot compute an unbounded result.
@@ -106,6 +107,24 @@ DISALLOWED_FUNCTIONS = (
     "dblink_connect_u",
     "dblink_disconnect",
 )
+
+#: Predefined roles whose membership grants more than reading rows: server-side file access,
+#: program execution, backend control or monitoring. A role that inherits one of them can do
+#: things ``SELECT`` should not allow — ``pg_read_file`` is reachable through
+#: ``pg_read_server_files`` — so the connection is refused rather than trusted.
+DANGEROUS_ROLE_MEMBERSHIPS = (
+    "pg_read_server_files",
+    "pg_write_server_files",
+    "pg_execute_server_program",
+    "pg_signal_backend",
+    "pg_monitor",
+    "pg_maintain",
+)
+
+#: A quoted identifier that spells an ordinary name. Those are re-exposed to the function scan
+#: (``SELECT "pg_read_file"('...')`` is a real call), while identifiers that contain anything
+#: else stay masked so their contents can never look like SQL structure.
+_PLAIN_IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 
 _KEYWORD_REGEX = re.compile(
     r"\b(" + "|".join(DISALLOWED_KEYWORDS) + r")\b",
@@ -240,8 +259,10 @@ def validate_sql_query(query: str) -> str:
         raise ValueError(f"Query contains prohibited SQL keyword(s): {', '.join(prohibited)}")
 
     # Prohibited built-ins are function calls, not keywords, so they need their own scan. The
-    # mask means the name only counts when it appears in SQL structure, never inside data.
-    function_matches = _FUNCTION_REGEX.findall(structural)
+    # name only counts when it appears in SQL structure, never inside data — but a quoted
+    # identifier is structure: PostgreSQL resolves "pg_read_file" exactly like pg_read_file,
+    # so plain identifiers are re-exposed here while everything else stays masked.
+    function_matches = _FUNCTION_REGEX.findall(_mask_literals(cleaned, unquote_identifiers=True))
     if function_matches:
         prohibited_functions = sorted({m.lower() for m in function_matches})
         raise ValueError(
@@ -251,12 +272,21 @@ def validate_sql_query(query: str) -> str:
     return cleaned
 
 
-def _mask_literals(sql: str) -> str:
+def _mask_literals(sql: str, *, unquote_identifiers: bool = False) -> str:
     """Replace string literals, quoted identifiers and dollar quotes with blanks.
 
     Keeps every structural scan focused on SQL syntax instead of matching words that merely
     appear inside a quoted value or a quoted column name. The mask preserves string length so
     offsets computed on masked text remain valid for the original statement.
+
+    Args:
+        sql: Statement to mask.
+        unquote_identifiers: Re-expose plain quoted identifiers (``"name"`` → ``name``)
+            instead of blanking them. Used only by the function scan: PostgreSQL resolves a
+            quoted identifier to the same object as the bare name, so ``SELECT
+            "pg_read_file"('...')`` is a real call to the built-in. Left off everywhere else,
+            where an identifier spelled like a keyword (``SELECT "delete" FROM t``) must not
+            be read as SQL structure.
 
     Three PostgreSQL quoting forms are handled, because each one can otherwise smuggle a
     keyword or a statement separator past a naive scanner:
@@ -287,6 +317,12 @@ def _mask_literals(sql: str) -> str:
 
         if char == '"':
             end = _quoted_end(sql, index, '"', backslash_escapes=False)
+            if unquote_identifiers and end - index >= 2 and sql[end - 1] == '"':
+                identifier = sql[index + 1 : end - 1].replace('""', '"')
+                if _PLAIN_IDENTIFIER_REGEX.match(identifier):
+                    masked.append(identifier + " " * (end - index - len(identifier)))
+                    index = end
+                    continue
             masked.append(" " * (end - index))
             index = end
             continue
@@ -428,14 +464,18 @@ async def _enforce_read_only_session(conn: AsyncConnection, *, strict: bool) -> 
     ``SET TRANSACTION READ ONLY`` is belt-and-braces on top of the role's
     ``default_transaction_read_only``: even a misconfigured role cannot write through this
     connection. The role check is the runtime half of the isolation guarantee — a superuser
-    URL accidentally configured as ``DATABASE_READONLY_URL`` is refused before any query runs.
+    URL accidentally configured as ``DATABASE_READONLY_URL`` is refused before any query runs,
+    and so is a role that *inherits* the privileges ``SELECT`` should not reach. Inherited
+    membership is the case the provisioner cannot see in a deployment that reuses a
+    pre-existing role, so it is checked here, per session, as well.
 
     Args:
         conn: Connection about to run the query. Must be in a fresh transaction.
         strict: Whether this is the tool's own configured engine (subject to the role check).
 
     Raises:
-        ToolSecurityError: If a strict connection is a superuser.
+        ToolSecurityError: If a strict connection cannot be verified, is a superuser, has
+            ``BYPASSRLS``, or is a member of a privileged predefined role.
     """
     if conn.dialect.name != "postgresql":
         return
@@ -444,11 +484,30 @@ async def _enforce_read_only_session(conn: AsyncConnection, *, strict: bool) -> 
     if not strict:
         return
 
-    is_superuser = (
+    # One round trip: the attributes and any dangerous membership, resolved through
+    # pg_has_role so indirect membership counts too. Roles that do not exist are skipped by
+    # the join instead of raising, which keeps this portable across PostgreSQL versions.
+    role_state = (
         await conn.execute(
-            text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user"),
+            text(
+                "SELECT r.rolsuper, r.rolbypassrls, "
+                "ARRAY(SELECT g.rolname FROM pg_roles g "
+                "WHERE g.rolname::text = ANY(:privileged) "
+                "AND pg_has_role(current_user, g.oid, 'MEMBER')) "
+                "FROM pg_roles r WHERE r.rolname = current_user"
+            ),
+            {"privileged": list(DANGEROUS_ROLE_MEMBERSHIPS)},
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
+    if role_state is None:
+        logger.error("Refusing to run sql_readonly: current_user is absent from pg_roles.")
+        raise ToolSecurityError(
+            "The read-only SQL tool could not verify its database role. Point "
+            "DATABASE_READONLY_URL at a dedicated non-superuser role.",
+            tool_name="sql_readonly",
+        )
+
+    is_superuser, bypasses_rls, inherited = role_state
     if is_superuser is not False:
         logger.error(
             "Refusing to run sql_readonly: connected role is a superuser (rolsuper=%s).",
@@ -457,6 +516,24 @@ async def _enforce_read_only_session(conn: AsyncConnection, *, strict: bool) -> 
         raise ToolSecurityError(
             "The read-only SQL tool is configured with a superuser role. Point "
             "DATABASE_READONLY_URL at a dedicated non-superuser role.",
+            tool_name="sql_readonly",
+        )
+    if bypasses_rls:
+        logger.error("Refusing to run sql_readonly: the role has BYPASSRLS.")
+        raise ToolSecurityError(
+            "The read-only SQL tool is configured with a role that has BYPASSRLS, so row-level "
+            "security would not apply. Revoke the attribute or use a dedicated role.",
+            tool_name="sql_readonly",
+        )
+    if inherited:
+        logger.error(
+            "Refusing to run sql_readonly: the role inherits privileged membership(s) %s.",
+            inherited,
+        )
+        raise ToolSecurityError(
+            "The read-only SQL tool is configured with a role that inherits "
+            f"{', '.join(inherited)}. Revoke the membership (scripts/init_readonly_role.py "
+            "does this) or use a dedicated role.",
             tool_name="sql_readonly",
         )
 

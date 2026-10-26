@@ -275,6 +275,15 @@ readable by anyone who can reach those ports.
   `POSTGRES_READONLY_USER` with `CONNECT`/`USAGE`/`SELECT` only and
   `default_transaction_read_only = on`. The `sql_readonly` tool connects with it and refuses to
   run when `DATABASE_READONLY_URL` is absent, so the agent never touches the application role.
+  A role that already exists is *restricted*, not merely given a new password: the script
+  revokes `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` and `BYPASSRLS`, drops every
+  inherited role membership (`pg_read_server_files` would otherwise allow `pg_read_file`) and
+  revokes all non-`SELECT` object privileges before granting `SELECT` back. It then verifies
+  the result and exits non-zero if anything remains, and it refuses a role that owns the
+  database, because an owner can grant itself anything. At request time the tool independently
+  refuses a superuser, a role with `BYPASSRLS`, or a role that is (directly or indirectly) a
+  member of `pg_read_server_files`, `pg_write_server_files`, `pg_execute_server_program`,
+  `pg_signal_backend`, `pg_monitor` or `pg_maintain`.
 
 Verify the effective configuration before starting the stack:
 

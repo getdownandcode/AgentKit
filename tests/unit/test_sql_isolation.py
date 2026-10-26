@@ -41,6 +41,10 @@ from agentkit.tools.builtin.sql_readonly import (
         "SELECT dblink_exec('dbname=other', 'DROP TABLE runs')",
         "SELECT pg_logical_emit_message(true, 'prefix', 'payload')",
         "SELECT * FROM t WHERE pg_sleep IS NULL AND pg_reload_conf()",
+        # A quoted identifier resolves to the same function: "pg_read_file" is pg_read_file.
+        "SELECT \"pg_read_file\"('/etc/passwd')",
+        "SELECT \"pg_read_binary_file\"('/etc/passwd') AS leak",
+        'SELECT "pg_terminate_backend"(12345)',
     ],
 )
 def test_side_effecting_and_file_reading_functions_are_rejected(payload: str) -> None:
@@ -74,6 +78,11 @@ def test_dollar_quote_and_escape_string_payloads_are_rejected(
         "SELECT E'line\\nbreak' AS escaped",
         "SELECT * FROM events WHERE action = 'insert'",
         "SELECT 'drop me' AS harmless",
+        # Data that merely spells a built-in is still data.
+        "SELECT 'pg_read_file(' AS note",
+        # A quoted identifier cannot hide a call, and a keyword-shaped column name is fine.
+        'SELECT "delete" FROM events',
+        'SELECT "created at" FROM events',
     ],
 )
 def test_legitimate_literals_still_pass(payload: str) -> None:

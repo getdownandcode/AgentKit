@@ -121,6 +121,53 @@ async def test_tool_reads_through_the_dedicated_role(
     assert "runs_count" in output
 
 
+async def test_reused_role_has_its_privileges_stripped(real_database_url: str) -> None:
+    """Provisioning a pre-existing privileged role must leave it read-only.
+
+    Reuse is the case a password-only update got wrong: the role kept ``CREATEDB`` and a
+    membership in ``pg_read_server_files``, which is enough to read server files through
+    ``pg_read_file`` even though the tool's ``SELECT`` grant says otherwise.
+    """
+    admin_engine = create_async_engine(real_database_url)
+    try:
+        async with admin_engine.begin() as conn:
+            await conn.execute(
+                text(f"ALTER ROLE {READONLY_ROLE} CREATEDB NOSUPERUSER")  # noqa: S608
+            )
+            await conn.execute(text(f"GRANT pg_read_server_files TO {READONLY_ROLE}"))
+            createdb: bool = (
+                await conn.execute(
+                    text("SELECT rolcreatedb FROM pg_roles WHERE rolname = :role"),
+                    {"role": READONLY_ROLE},
+                )
+            ).scalar_one()
+        assert createdb is True, "the fixture did not actually privilege the role"
+
+        url = _readonly_url(real_database_url)
+        await provision_readonly_role(real_database_url, url)
+
+        async with admin_engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT r.rolsuper, r.rolcreatedb, r.rolbypassrls, "
+                        "ARRAY(SELECT g.rolname FROM pg_auth_members m "
+                        "JOIN pg_roles g ON g.oid = m.roleid "
+                        "JOIN pg_roles u ON u.oid = m.member "
+                        "WHERE u.rolname = :role) "
+                        "FROM pg_roles r WHERE r.rolname = :role"
+                    ),
+                    {"role": READONLY_ROLE},
+                )
+            ).one()
+    finally:
+        await admin_engine.dispose()
+
+    is_superuser, can_create_db, bypasses_rls, memberships = row
+    assert (is_superuser, can_create_db, bypasses_rls) == (False, False, False)
+    assert list(memberships) == []
+
+
 def _settings(database_url: str, readonly_url: str | None) -> object:
     from types import SimpleNamespace
 
