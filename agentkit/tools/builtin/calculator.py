@@ -1,12 +1,18 @@
 """Safe arithmetic calculator tool powered by strict Python AST parsing."""
 
 import ast
+import math
 
 from agentkit.tools.registry import tool
 
 MAX_EXPRESSION_LEN = 1000
 MAX_AST_NODES = 100
 MAX_EXPONENT = 1000
+#: When the base magnitude grows too, an exponent well below MAX_EXPONENT can already
+#: overflow a float (``1000.0 ** 100`` is ~1e300; ``1999.0 ** 101`` is inf), so pairs of an
+#: oversized base and a still-large exponent are rejected before the operation runs.
+MAX_POW_BASE_MAGNITUDE = 1000
+MAX_POW_PAIR_EXPONENT = 100
 
 #: Rough ceiling on the bit length of an exponentiation result. 10**1000 is ~3322 bits and
 #: still cheap once, but the ReAct loop can repeat the call, so the result size itself is
@@ -23,6 +29,11 @@ def _evaluate_node(node: ast.AST) -> int | float:
         # Explicitly reject boolean, string, None, complex, etc.
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
             raise ValueError(f"Disallowed operand type: {type(node.value).__name__}")
+        # A float literal that overflows Python's double range (e.g. ``1e999``) silently
+        # becomes inf at parse time; anchoring finiteness here keeps it out of every
+        # subsequent operation.
+        if isinstance(node.value, float) and not math.isfinite(node.value):
+            raise ValueError("Numeric literal is not finite (out of range)")
         return node.value
 
     if isinstance(node, ast.UnaryOp):
@@ -56,7 +67,9 @@ def _evaluate_node(node: ast.AST) -> int | float:
                 raise ValueError("Modulo by zero")
             return left % right
         if isinstance(node.op, ast.Pow):
-            if abs(right) > MAX_EXPONENT or (abs(left) > 1000 and right > 100):
+            if abs(right) > MAX_EXPONENT or (
+                abs(left) > MAX_POW_BASE_MAGNITUDE and right > MAX_POW_PAIR_EXPONENT
+            ):
                 raise ValueError(f"Exponent too large (maximum allowed is {MAX_EXPONENT})")
 
             # The exponent bound alone still permits enormous big integers (10**1000 is a
@@ -108,7 +121,16 @@ def safe_calculate(expression: str) -> int | float:
     if len(nodes) > MAX_AST_NODES:
         raise ValueError(f"Expression too complex (exceeds {MAX_AST_NODES} AST nodes).")
 
-    return _evaluate_node(tree)
+    result = _evaluate_node(tree)
+
+    # Any float operand is finite, but sums/products/divisions can still overflow into
+    # inf or collapse into nan. Intercept once at the exit so neither ever reaches the
+    # prompt or history. (The only finite value derivable from an inf intermediate is
+    # inf ** 0 == 1.0, which is the correct x**0 answer rather than a masked overflow.)
+    if isinstance(result, float) and not math.isfinite(result):
+        raise ValueError("Result is not a finite number")
+
+    return result
 
 
 @tool

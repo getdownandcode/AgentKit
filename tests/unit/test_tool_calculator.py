@@ -93,6 +93,29 @@ def test_dos_protection_large_exponents() -> None:
         safe_calculate("10 ** 10000")
 
 
+def test_non_finite_results_rejected() -> None:
+    with pytest.raises(ValueError, match="not a finite number"):
+        safe_calculate("1e308 * 10 ** 3")
+
+    with pytest.raises(ValueError, match="not a finite number"):
+        safe_calculate("1e308 * 2")
+
+
+def test_overflowing_float_literal_rejected() -> None:
+    # A float literal beyond double range silently parses to inf at AST level.
+    with pytest.raises(ValueError, match="not finite"):
+        safe_calculate("1e999")
+
+    with pytest.raises(ValueError, match="not finite"):
+        safe_calculate("-1e999")
+
+
+def test_large_integer_results_still_allowed() -> None:
+    assert safe_calculate("2 ** 1000") == 2**1000
+    assert safe_calculate("10 ** 100") == 10**100
+    assert safe_calculate("1000 ** 100") == 1000**100
+
+
 def test_calculator_tool_function() -> None:
     assert calculator("10 + 20") == "30"
     assert calculator("7 / 2") == "3.5"

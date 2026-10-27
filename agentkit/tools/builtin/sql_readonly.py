@@ -36,6 +36,26 @@ logger = logging.getLogger(__name__)
 DEFAULT_ROW_LIMIT = 50
 DEFAULT_STATEMENT_TIMEOUT_S = 10.0
 
+#: Per-cell character ceiling for rendered table cells. The executor budget
+#: (TOOL_OUTPUT_MAX_CHARS) bounds the whole table afterwards, but one wide column value
+#: should not be able to consume most of that budget — or hide a large payload — behind
+#: row truncation.
+MAX_CELL_CHARS = 200
+
+#: Row-breaking and invisible control characters are rewritten to visible escapes, and
+#: every other C0 control character (plus DEL) is rendered as ``\\uXXXX`` so no control
+#: byte reaches the prompt as structure.
+_CONTROL_CHAR_ESCAPES: dict[int, str] = {
+    ord("\n"): "\\n",
+    ord("\r"): "\\r",
+    ord("\t"): "\\t",
+    **{
+        code: f"\\u{code:04x}"
+        for code in (*range(0x20), 0x7F)
+        if code not in (ord("\n"), ord("\r"), ord("\t"))
+    },
+}
+
 DISALLOWED_KEYWORDS = (
     "insert",
     "update",
@@ -402,17 +422,36 @@ def _dollar_quote_end(sql: str, start: int) -> int | None:
     return len(sql) if closing == -1 else closing + len(tag)
 
 
+def _escape_cell_text(raw_text: str) -> str:
+    """Escape and bound a single table cell so it cannot alter the markdown structure.
+
+    A pipe would forge additional columns, a newline would forge additional rows, and
+    invisible control characters could smuggle prompt structure — the classic stored
+    prompt injection through attacker-influenced database values. Backslash is escaped
+    first so it cannot escape its own escape sequences. Finiteness of the rendered
+    length (not the raw value) is the cap, so the displayed cell is bounded no matter
+    how the escapes inflated the text.
+    """
+    escaped = raw_text.replace("\\", "\\\\").replace("|", "\\|")
+    escaped = escaped.translate(_CONTROL_CHAR_ESCAPES)
+    if len(escaped) > MAX_CELL_CHARS:
+        escaped = escaped[:MAX_CELL_CHARS] + "[Truncated]"
+    return escaped
+
+
+def _format_cell(value: Any) -> str:
+    """Render one SQL result value as a safe markdown table cell."""
+    return "NULL" if value is None else _escape_cell_text(str(value))
+
+
 def format_rows_as_markdown(columns: Sequence[str], rows: Sequence[Any]) -> str:
     """Format tabular SQL results into clean Markdown table string."""
     if not rows:
         return "No rows returned."
 
-    header = "| " + " | ".join(columns) + " |"
+    header = "| " + " | ".join(_format_cell(col) for col in columns) + " |"
     divider = "| " + " | ".join(["---"] * len(columns)) + " |"
-    data_lines = [
-        "| " + " | ".join(str(val) if val is not None else "NULL" for val in row) + " |"
-        for row in rows
-    ]
+    data_lines = ["| " + " | ".join(_format_cell(val) for val in row) + " |" for row in rows]
     return "\n".join([header, divider, *data_lines])
 
 

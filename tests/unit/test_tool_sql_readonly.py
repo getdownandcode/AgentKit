@@ -7,7 +7,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from agentkit.tools.builtin.sql_readonly import (
+    MAX_CELL_CHARS,
     execute_sql_query,
+    format_rows_as_markdown,
     sql_readonly,
     validate_sql_query,
 )
@@ -158,3 +160,67 @@ async def test_sql_tool_registry_integration(
     bad_result = await registry.execute(bad_call)
     assert bad_result.ok is False
     assert "Only SELECT" in (bad_result.error or "")
+
+
+def test_markdown_escapes_pipe_and_backslash_per_cell() -> None:
+    """A pipe in a cell value cannot forge additional columns, and rows stay intact."""
+    output = format_rows_as_markdown(["customer"], [("Al|ice",), ("a\\b",), ("Bob",)])
+
+    assert output.splitlines() == [
+        "| customer |",
+        "| --- |",
+        "| Al\\|ice |",
+        "| a\\\\b |",
+        "| Bob |",
+    ]
+
+
+def test_markdown_escapes_newlines_and_control_characters() -> None:
+    """A newline in a cell value cannot forge additional rows."""
+    output = format_rows_as_markdown(["text"], [("line1\nline2\r\nline3\x07end\x7f",)])
+
+    assert output.splitlines() == [
+        "| text |",
+        "| --- |",
+        "| line1\\nline2\\r\\nline3\\u0007end\\u007f |",
+    ]
+
+
+def test_markdown_null_and_unchanged_basics() -> None:
+    output = format_rows_as_markdown(["a", "b"], [(None, 150.0)])
+
+    assert output.splitlines() == ["| a | b |", "| --- | --- |", "| NULL | 150.0 |"]
+
+
+def test_markdown_truncates_oversized_cell() -> None:
+    output = format_rows_as_markdown(["c"], [("x" * 5_000,)])
+    lines = output.splitlines()
+
+    # One data row, one bounded cell, marker appended inside the cell.
+    assert len(lines) == 3
+    assert lines[-1].endswith("[Truncated] |")
+    assert len(lines[-1]) <= MAX_CELL_CHARS + len("[Truncated]") + 4
+
+
+def test_markdown_escapes_column_names_too() -> None:
+    output = format_rows_as_markdown(["name|extra"], [("v",)])
+
+    assert output.splitlines()[0] == "| name\\|extra |"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_escapes_adversarial_cells(demo_db_engine: AsyncEngine) -> None:
+    async with demo_db_engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO orders (customer, amount) VALUES ('Al|ice\nEvil', 7.5)")
+        )
+
+    output = await execute_sql_query(
+        "SELECT customer, amount FROM orders ORDER BY id", engine=demo_db_engine
+    )
+    lines = [line for line in output.strip().split("\n") if line.strip()]
+
+    # Header + divider + 4 data rows: the injected pipe and newline are escapes within
+    # one cell, not structure that adds a line or column.
+    assert len(lines) == 6
+    assert "Al\\|ice\\nEvil" in output
