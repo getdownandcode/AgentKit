@@ -161,6 +161,78 @@ async def test_http_fetch_size_limit() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("requested", "expected"), [(-20, 1), (10**9, 100_000)])
+async def test_http_fetch_clamps_max_chars(requested: int, expected: int) -> None:
+    response = httpx.Response(
+        200, text="x" * 100_001, request=httpx.Request("GET", "https://example.com")
+    )
+    with (
+        patch("agentkit.tools.builtin.http_fetch.resolve_host_ips", return_value=[PUBLIC_IP]),
+        _patch_stream(response),
+    ):
+        assert len(await http_fetch("https://example.com", max_chars=requested)) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("requested", "expected"), [(-1.0, 0.1), (10**9, 30.0)])
+async def test_http_fetch_clamps_timeout(requested: float, expected: float) -> None:
+    response = httpx.Response(200, text="ok", request=httpx.Request("GET", "https://example.com"))
+    original_client = httpx.AsyncClient
+    with (
+        patch("agentkit.tools.builtin.http_fetch.resolve_host_ips", return_value=[PUBLIC_IP]),
+        _patch_stream(response),
+        patch(
+            "agentkit.tools.builtin.http_fetch.httpx.AsyncClient", wraps=original_client
+        ) as client,
+    ):
+        assert await http_fetch("https://example.com", timeout_s=requested) == "ok"
+        assert client.call_args.kwargs["timeout"].connect == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf")])
+async def test_http_fetch_rejects_nonfinite_timeout(timeout: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        await http_fetch("https://example.com", timeout_s=timeout)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", ["application/octet-stream", "image/png"])
+async def test_http_fetch_rejects_binary_before_reading(content_type: str) -> None:
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": content_type},
+        content=b"\x00\xff",
+        request=httpx.Request("GET", "https://example.com"),
+    )
+    with (
+        patch("agentkit.tools.builtin.http_fetch.resolve_host_ips", return_value=[PUBLIC_IP]),
+        _patch_stream(response),
+        patch.object(response, "aiter_bytes", side_effect=AssertionError("body read")),
+        pytest.raises(ValueError, match="Unsupported content type"),
+    ):
+        await http_fetch("https://example.com")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content_type", ["application/json; charset=utf-8", "application/problem+json", "text/html"]
+)
+async def test_http_fetch_accepts_textual_media_types(content_type: str) -> None:
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": content_type},
+        content=b"hello",
+        request=httpx.Request("GET", "https://example.com"),
+    )
+    with (
+        patch("agentkit.tools.builtin.http_fetch.resolve_host_ips", return_value=[PUBLIC_IP]),
+        _patch_stream(response),
+    ):
+        assert await http_fetch("https://example.com") == "hello"
+
+
+@pytest.mark.asyncio
 async def test_http_fetch_rejects_rebind_to_unvalidated_peer() -> None:
     """A connection that lands off the validated addresses must be refused.
 
