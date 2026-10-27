@@ -1,5 +1,6 @@
 """Unit and security tests for sandboxed file reader tool."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -88,6 +89,52 @@ def test_max_bytes_limit_enforced(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="exceeds maximum size limit"):
         read_sandboxed_file("large.txt", base_dir=tmp_path, max_bytes=100)
+
+
+def test_exact_cap_file_is_readable(tmp_path: Path) -> None:
+    doc = tmp_path / "exact.txt"
+    doc.write_text("A" * 40, encoding="utf-8")
+
+    assert read_sandboxed_file("exact.txt", base_dir=tmp_path, max_bytes=40) == "A" * 40
+
+
+def test_size_cap_enforced_on_the_read_not_on_stat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file whose stat lies small is still capped by the bytes actually read.
+
+    Regression: the cap used to consult ``stat().st_size`` and then re-open the file, so a
+    file grown between the two calls bypassed the limit completely. Lying about the size is
+    an observable stand-in for that race; the bounded read must reject it regardless.
+    """
+    doc = tmp_path / "growing.txt"
+    doc.write_text("A" * 50, encoding="utf-8")
+
+    real_stat = Path.stat
+
+    def lying_stat(self: Path, *, follow_symlinks: bool = True) -> "os.stat_result":
+        st = real_stat(self, follow_symlinks=follow_symlinks)
+        # Report st_size = 10 while the real content is 50 bytes.
+        return os.stat_result(
+            (
+                st.st_mode,
+                st.st_ino,
+                st.st_dev,
+                st.st_nlink,
+                st.st_uid,
+                st.st_gid,
+                10,
+                st.st_atime,
+                st.st_mtime,
+                st.st_ctime,
+            )
+        )
+
+    monkeypatch.setattr(Path, "stat", lying_stat)
+
+    # The old stat-driven cap would have passed this file through and returned all 50 bytes.
+    with pytest.raises(ValueError, match="exceeds maximum size limit"):
+        read_sandboxed_file("growing.txt", base_dir=tmp_path, max_bytes=40)
 
 
 def test_binary_file_rejected(tmp_path: Path) -> None:

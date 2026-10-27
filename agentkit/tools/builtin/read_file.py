@@ -50,14 +50,18 @@ def read_sandboxed_file(
     if not target.is_file():
         raise ValueError(f"Target is not a regular file: '{file_path}'")
 
-    file_size = target.stat().st_size
-    if file_size > max_bytes:
-        raise ValueError(
-            f"File '{file_path}' exceeds maximum size limit of {max_bytes} bytes (size: {file_size} bytes)."
-        )
+    # The byte cap is enforced on the bytes actually read, not on a prior st_size: a file
+    # grown between a stat check and a second open would otherwise be read in full (the
+    # check-then-read race). One bounded read of max_bytes + 1 closes that window while
+    # making oversize still fail — and an exact-cap file stays fully readable.
+    with target.open("rb") as handle:
+        data = handle.read(max_bytes + 1)
+
+    if len(data) > max_bytes:
+        raise ValueError(f"File '{file_path}' exceeds maximum size limit of {max_bytes} bytes.")
 
     try:
-        return target.read_text(encoding="utf-8")
+        return data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(f"File '{file_path}' is not a valid UTF-8 text file.") from exc
 
