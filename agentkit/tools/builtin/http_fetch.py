@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import math
 import socket
 from urllib.parse import urljoin, urlparse
 
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_S = 10.0
 DEFAULT_MAX_CHARS = 100_000
+MAX_TIMEOUT_S = 30.0
+MAX_CHARS = DEFAULT_MAX_CHARS
 MAX_REDIRECTS = 3
 
 #: Hard ceiling on bytes read from a response body. ``max_chars`` bounds what is *returned*;
@@ -180,8 +183,12 @@ async def http_fetch(
     Redirects are validated individually against SSRF restrictions, and the connected peer
     address is re-checked against the validated addresses.
     """
+    if not math.isfinite(timeout_s):
+        raise ValueError("timeout_s must be finite")
+    timeout_s = max(0.1, min(timeout_s, MAX_TIMEOUT_S))
+    max_chars = max(1, min(max_chars, MAX_CHARS))
     current_url = url
-    read_budget = min(MAX_RESPONSE_BYTES, max(max_chars, 1))
+    read_budget = min(MAX_RESPONSE_BYTES, max_chars)
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s)) as client:
         for _ in range(MAX_REDIRECTS + 1):
@@ -199,6 +206,17 @@ async def http_fetch(
                     continue
 
                 response.raise_for_status()
+
+                content_type = (
+                    response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                )
+                if content_type and not (
+                    content_type.startswith("text/")
+                    or content_type
+                    in {"application/json", "application/xml", "application/javascript"}
+                    or content_type.endswith(("+json", "+xml"))
+                ):
+                    raise ValueError(f"Unsupported content type: {content_type}")
 
                 chunks: list[bytes] = []
                 total = 0
