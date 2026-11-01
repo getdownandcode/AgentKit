@@ -2,6 +2,14 @@
 
 This log records significant architectural, technical, and design decisions made throughout the lifecycle of AgentKit.
 
+## ADR-021: Run Cancellation and Turn-Level Trace Usage
+
+- **Date**: 2026-11-01
+- **Status**: Accepted
+- **Context**: Cancellation can interrupt a run after its durable `running` row is created, and a model response that requests multiple tools has one usage count shared by all calls.
+- **Decision**: On cancellation, finalize the run as `canceled` and persist repaired session history through a shielded finalization before re-raising cancellation. Store turn-level token usage on only the first successfully recorded tool trace for that reasoning step; subsequent call traces of the same step carry zero on the token columns, keeping per-call latency and outcome. Register the optional `web_search` tool only when `SEARCH_API_KEY` is present.
+- **Consequences**: Callers still observe task cancellation, persisted run state is terminal, and `sum(steps.input_tokens/output_tokens) <= runs.total_input_tokens/total_output_tokens` for any run. Equality holds only when every LLM turn either requested tools (so its usage landed on that step's first recorded tool trace) or consumed no tokens; the last, tool-free answer turn contributes to `runs.total_*` only, never to `steps`. Trace consumers must not treat zero-token rows as "the model used no tokens": they mean "this row does not carry the turn's usage". Search availability is consistent between runtime schemas and `GET /tools`.
+
 ---
 
 ## ADR-001: Framework-less Agent Runtime from Scratch

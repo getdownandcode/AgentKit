@@ -116,14 +116,15 @@ def get_trace_sink(request: Request) -> TraceSink:
     return PostgresTraceSink(factory)
 
 
-def create_default_tool_registry() -> ToolRegistry:
-    """Construct standard ToolRegistry populated with all AgentKit built-in tools."""
+def create_default_tool_registry(search_api_key: str | None = None) -> ToolRegistry:
+    """Construct the built-in registry, including search only when configured."""
     registry = ToolRegistry()
     registry.register(calculator)
     registry.register(read_file)
     registry.register(http_fetch)
     registry.register(sql_readonly)
-    registry.register(web_search)
+    if search_api_key:
+        registry.register(web_search)
     return registry
 
 
@@ -133,7 +134,10 @@ def get_tool_registry(request: Request) -> ToolRegistry:
         reg: ToolRegistry = request.app.state.tool_registry
         return reg
 
-    registry = create_default_tool_registry()
+    settings: Settings = getattr(request.app.state, "settings", None) or get_current_settings(
+        request
+    )
+    registry = create_default_tool_registry(settings.SEARCH_API_KEY)
     request.app.state.tool_registry = registry
     return registry
 

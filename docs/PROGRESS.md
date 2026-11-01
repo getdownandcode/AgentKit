@@ -4,6 +4,7 @@ This document tracks execution progress across all backlog tasks, including pull
 
 | Task ID | Milestone | Title | Branch | PR # | Commits | Status | Notes & Blockers |
 |---------|-----------|-------|--------|------|---------|--------|------------------|
+| ROADMAP-01/06/07 | M14 | Run cancellation, token accounting, optional search registration | `fix/related-run-tool-hardening` | Pending | 0 | In progress | Fixes #93, #98 and #99 together: canceled runs persist terminal state, turn usage is attributed once across tool traces, and web_search is registered only with SEARCH_API_KEY. Quality gates pass (ruff check/format, mypy agentkit); tests not added or run per task instruction. Staged for review: awaiting task approval to commit, push, and open the single review PR (`gh` authentication verified). |
 | M0-T01  | M0        | Repository Setup & Context Scaffolding | `main` | N/A | 7 | Done | Initial warm-up repository scaffolding |
 | M0-T02  | M0        | Configuration Management | `feat/config-settings` | #1 | 2 | Done | Pydantic BaseSettings with env validation |
 | M0-T03  | M0        | Domain Errors & Core Base Types | `feat/core-errors-types` | #2 | 2 | Done | AgentKitError hierarchy, to_dict, StrEnum types |

@@ -300,6 +300,7 @@ class Agent:
             total_input_tokens = 0
             total_output_tokens = 0
             steps_count = 0
+            traced_turn_usage: set[int] = set()
             # Sliding window of recent call signatures. Remembering only the immediately
             # preceding signature lets an alternating pattern (A, B, A, B, ...) reset the
             # counter on every step, so the guard never fires and the run burns max_steps.
@@ -401,10 +402,19 @@ class Agent:
                                             result=result.model_dump(),
                                             error=result.error,
                                             latency_ms=result.latency_ms,
-                                            input_tokens=response.usage.input_tokens,
-                                            output_tokens=response.usage.output_tokens,
+                                            input_tokens=(
+                                                response.usage.input_tokens
+                                                if steps_count not in traced_turn_usage
+                                                else 0
+                                            ),
+                                            output_tokens=(
+                                                response.usage.output_tokens
+                                                if steps_count not in traced_turn_usage
+                                                else 0
+                                            ),
                                         )
                                         await self.trace.record(trace_record)
+                                        traced_turn_usage.add(steps_count)
                         else:
                             # No tool calls: this is the final answer, a provider refusal, or
                             # an empty completion. Only a non-empty answer is a success; the
@@ -485,6 +495,25 @@ class Agent:
                         raise MaxStepsExceeded(self.config.max_steps)
                     return res_max
 
+            except asyncio.CancelledError:
+                duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
+                logger.info("Agent run canceled")
+                canceled_result = RunResult(
+                    run_id=run_id,
+                    session_id=session_id,
+                    goal=goal,
+                    status=RunStatus.CANCELED,
+                    failure_reason="Run was canceled by the caller.",
+                    steps_count=steps_count,
+                    total_input_tokens=total_input_tokens,
+                    total_output_tokens=total_output_tokens,
+                    duration_ms=duration_ms,
+                )
+                try:
+                    await asyncio.shield(_finalize_and_return(canceled_result))
+                except PersistenceError:
+                    logger.error("Could not persist canceled run state for run %s", run_id)
+                raise
             except PersistenceError:
                 # Already logged with its run id; re-raise rather than converting it into a
                 # FAILED result that the caller could mistake for an executed-but-failed run.
