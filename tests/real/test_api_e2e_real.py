@@ -31,8 +31,13 @@ pytestmark = pytest.mark.real_infra
 API_KEY = "ak_real_infra_key"
 
 
-def _build_settings() -> Settings:
-    """Settings pointing the app at the live infrastructure under test."""
+def _build_settings(search_api_key: str | None = None) -> Settings:
+    """Settings pointing the app at the live infrastructure under test.
+
+    The search key is always part of the constructed settings object so the served
+    tool set is pinned by the test case itself and cannot depend on whether the CI
+    or the developer environment happens to export SEARCH_API_KEY.
+    """
     return Settings(
         DATABASE_URL=database_test_url(),
         REDIS_URL=redis_test_url(),
@@ -42,6 +47,7 @@ def _build_settings() -> Settings:
         MAX_STEPS=5,
         RUN_TIMEOUT_S=30,
         SESSION_TTL_S=3600,
+        SEARCH_API_KEY=search_api_key,
     )
 
 
@@ -90,6 +96,33 @@ def client(real_client: tuple[TestClient, FakeLLMClient]) -> TestClient:
 def llm(real_client: tuple[TestClient, FakeLLMClient]) -> FakeLLMClient:
     """The scripted LLM half of the real_client fixture."""
     return real_client[1]
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("fake_search_key", id="search-enabled"),
+        pytest.param(None, id="search-disabled"),
+    ]
+)
+def tools_client(
+    request: pytest.FixtureRequest,
+    real_engine: AsyncEngine,
+    real_redis: Redis[str],
+) -> Iterator[tuple[TestClient, bool]]:
+    """TestClient built with a deterministic SEARCH_API_KEY for each case.
+
+    A separate application per case is what makes both behaviors observable: the
+    registry is memoized on app.state at first /tools access, so one shared client
+    could serve whichever case ran first. The fixtures are requested for the same
+    guarantee as real_client: truncate/cleanup happen before the app starts.
+    """
+    del real_engine, real_redis
+
+    search_key: str | None = request.param
+    app = create_app(settings=_build_settings(search_api_key=search_key))
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        yield client, search_key is not None
 
 
 async def test_health_reports_live_dependencies(client: TestClient) -> None:
@@ -203,13 +236,23 @@ async def test_run_details_and_missing_run(client: TestClient) -> None:
     assert client.get(f"/runs/{uuid.uuid4()}", headers=headers).status_code == 404
 
 
-async def test_tools_endpoint_exposes_builtin_registry(client: TestClient) -> None:
-    """The built-in tool registry is served from the real dependency graph."""
+async def test_tools_endpoint_matches_configured_search_key(
+    tools_client: tuple[TestClient, bool],
+) -> None:
+    """The served registry depends only on the explicitly pinned SEARCH_API_KEY.
+
+    Runs twice: with a key configured (web_search present) and without one
+    (web_search omitted) — the latter being exactly what CI sees, where
+    SEARCH_API_KEY is never set for the real-infrastructure job.
+    """
+    client, web_search_expected = tools_client
+
     response = client.get("/tools", headers={"X-API-Key": API_KEY})
 
     assert response.status_code == 200
     names = {t["name"] for t in response.json()["tools"]}
-    assert {"calculator", "read_file", "http_fetch", "sql_readonly", "web_search"} <= names
+    assert {"calculator", "read_file", "http_fetch", "sql_readonly"} <= names
+    assert ("web_search" in names) == web_search_expected
 
 
 async def test_unauthorized_request_is_rejected(client: TestClient) -> None:

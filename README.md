@@ -24,13 +24,14 @@ Designed from first principles for reliability, auditability, and production dep
   - `sql_readonly`: Read-only SQL executor over a dedicated non-superuser role (`DATABASE_READONLY_URL`, `default_transaction_read_only`, `SELECT`-only grants, fail-closed when unconfigured). A statement lexer accepts a single `SELECT`/`WITH`, rejects comments, DDL/DML and privileged built-ins (`pg_read_file`, `setval`, `query_to_xml`, …), and clamps `LIMIT ALL`/oversized limits in SQL.
   - `read_file`: Path traversal and symlink escape defended sandboxed file reader.
   - `http_fetch`: SSRF-protected HTTP client blocking private subnets, loopbacks, and cloud metadata endpoints.
-  - `web_search`: Search provider adapter with result truncation.
+  - `web_search`: Search provider adapter with result truncation; registered only when `SEARCH_API_KEY` is configured.
 - **Dual-Store Persistence**:
   - **Redis**: Sliding-window session memory and high-throughput sliding window rate limiter.
   - **PostgreSQL**: Durable execution audit trails with step-by-step latency, token counts, and tool outcomes.
 - **Enterprise-Grade Reliability**:
   - Exponential backoff retry with full jitter for transient LLM errors.
   - Global run timeout, per-tool timeout guards, and consecutive duplicate tool call loop detection.
+  - Client disconnects never leave zombie runs: cancellation persists a terminal `canceled` status plus repaired session history inside `asyncio.shield` before re-raising.
   - Structured contextual JSON logging (`run_id`, `step_no`, duration) with zero raw confidential prompt leakage.
 - **Containerized & CI-Ready**: Multi-stage production `Dockerfile`, `docker-compose.yml` with healthchecks, and full GitHub Actions CI matrix (`ruff`, `mypy`, `pytest` >= 85% coverage).
 
@@ -286,6 +287,8 @@ View run traces programmatically via REST API:
 ```bash
 curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8000/runs/{run_id}/trace | jq .
 ```
+
+Token attribution note: when one model turn requests several tool calls, the turn's token usage is recorded on that step's *first* successfully recorded tool-call row and sibling rows report `0` on the token columns — so `sum(steps.*) <= runs.total_*` always holds and zero-token rows mean "this row does not carry the turn's usage", not "no tokens were used" (see [docs/DECISIONS.md](docs/DECISIONS.md) ADR-021).
 
 ---
 

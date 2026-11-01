@@ -195,8 +195,18 @@ class Agent:
                         run_id=run_id,
                     ) from exc
 
-            async def _finalize_and_return(result: RunResult) -> RunResult:
-                if session_id and self.memory is not None and hasattr(self.memory, "save_messages"):
+            async def _finalize_and_return(
+                result: RunResult, *, save_history: bool = True
+            ) -> RunResult:
+                # save_history=False covers cancellation while the history load is still in
+                # flight: at that point the local list is empty and saving it would overwrite
+                # the stored conversation with nothing instead of repairing it.
+                if (
+                    save_history
+                    and session_id
+                    and self.memory is not None
+                    and hasattr(self.memory, "save_messages")
+                ):
                     _repair_trailing_tool_calls(messages)
                     try:
                         await self.memory.save_messages(session_id, messages)
@@ -257,10 +267,60 @@ class Agent:
                         ) from exc
                 return result
 
+            async def _finalize_canceled(*, save_history: bool) -> None:
+                """Persist a terminal canceled run state before the cancellation re-raises.
+
+                create_run() has already persisted a running row, and cancellation can land
+                on any awaited step that follows it — the session-history load or an await
+                inside the reasoning loop. Without this finalization the row would be
+                stranded in 'running' even though the caller received the cancellation.
+                """
+                duration_ms = max(0, int((time.perf_counter() - start_time) * 1000))
+                canceled_result = RunResult(
+                    run_id=run_id,
+                    session_id=session_id,
+                    goal=goal,
+                    status=RunStatus.CANCELED,
+                    failure_reason="Run was canceled by the caller.",
+                    steps_count=steps_count,
+                    total_input_tokens=total_input_tokens,
+                    total_output_tokens=total_output_tokens,
+                    duration_ms=duration_ms,
+                )
+                logger.info("Agent run canceled")
+                try:
+                    # shield keeps the terminal write alive against further cancellation so
+                    # the store never reads back a run that stayed 'running' behind a cancel.
+                    await asyncio.shield(
+                        _finalize_and_return(canceled_result, save_history=save_history)
+                    )
+                except PersistenceError:
+                    logger.error("Could not persist canceled run state for run %s", run_id)
+
+            # Initialized before the history load so a cancellation landing during setup
+            # can still read zeroed counters when composing the canceled RunResult.
+            total_input_tokens = 0
+            total_output_tokens = 0
+            steps_count = 0
+            traced_turn_usage: set[int] = set()
+            # Sliding window of recent call signatures. Remembering only the immediately
+            # preceding signature lets an alternating pattern (A, B, A, B, ...) reset the
+            # counter on every step, so the guard never fires and the run burns max_steps.
+            recent_tool_signatures: deque[tuple[str, str]] = deque(
+                maxlen=self.config.duplicate_tool_call_window
+            )
+
             messages: list[Message] = []
             if session_id and self.memory is not None and hasattr(self.memory, "get_messages"):
                 try:
                     loaded = await self.memory.get_messages(session_id)
+                except asyncio.CancelledError:
+                    # The history load is the only awaited setup the CancelledError handler
+                    # below does not reach, and it runs after the run row already exists.
+                    # Finalize here so the row cannot stay 'running'; history was never read
+                    # or mutated in this window, hence save_history is deliberately False.
+                    await _finalize_canceled(save_history=False)
+                    raise
                 except Exception as exc:
                     # Continuing here would answer with no context and then overwrite the real
                     # history with the shorter one: silent, permanent conversation loss.
@@ -296,16 +356,6 @@ class Agent:
                 if messages[0].role != Role.SYSTEM:
                     messages.insert(0, Message.system(self.config.system_prompt))
                 messages.append(Message.user(goal))
-
-            total_input_tokens = 0
-            total_output_tokens = 0
-            steps_count = 0
-            # Sliding window of recent call signatures. Remembering only the immediately
-            # preceding signature lets an alternating pattern (A, B, A, B, ...) reset the
-            # counter on every step, so the guard never fires and the run burns max_steps.
-            recent_tool_signatures: deque[tuple[str, str]] = deque(
-                maxlen=self.config.duplicate_tool_call_window
-            )
 
             try:
                 async with asyncio.timeout(self.config.run_timeout_s):
@@ -401,10 +451,19 @@ class Agent:
                                             result=result.model_dump(),
                                             error=result.error,
                                             latency_ms=result.latency_ms,
-                                            input_tokens=response.usage.input_tokens,
-                                            output_tokens=response.usage.output_tokens,
+                                            input_tokens=(
+                                                response.usage.input_tokens
+                                                if steps_count not in traced_turn_usage
+                                                else 0
+                                            ),
+                                            output_tokens=(
+                                                response.usage.output_tokens
+                                                if steps_count not in traced_turn_usage
+                                                else 0
+                                            ),
                                         )
                                         await self.trace.record(trace_record)
+                                        traced_turn_usage.add(steps_count)
                         else:
                             # No tool calls: this is the final answer, a provider refusal, or
                             # an empty completion. Only a non-empty answer is a success; the
@@ -485,6 +544,12 @@ class Agent:
                         raise MaxStepsExceeded(self.config.max_steps)
                     return res_max
 
+            except asyncio.CancelledError:
+                # Loop-time cancellation: every step up to here may have left an assistant
+                # tool-call turn without its results, so the history save (with repair) and
+                # the terminal run write must both run before the cancellation propagates.
+                await _finalize_canceled(save_history=True)
+                raise
             except PersistenceError:
                 # Already logged with its run id; re-raise rather than converting it into a
                 # FAILED result that the caller could mistake for an executed-but-failed run.
