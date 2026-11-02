@@ -81,6 +81,7 @@ This document tracks execution progress across all backlog tasks, including pull
 | ROADMAP-03 | ROADMAP | read_file Read-After-Stat Race | `fix/roadmap-02-03-04-tools-hardening` | #120 | 1 | Done | Byte cap enforced on a bounded `read(max_bytes + 1)` in one open; closes #95 |
 | ROADMAP-04 | ROADMAP | Calculator Non-Finite Result Guard | `fix/roadmap-02-03-04-tools-hardening` | #120 | 1 | Done | `math.isfinite` result check, inf literals rejected, pow pair guard named; closes #96 |
 | GH-92/111/113 | OPS | Operational Error Reporting | `fix/error-reporting-issues` | #123 | 6 | In Review | Invalid Postgres ports, sanitized agent failures and logged trace writes, settings-based OpenAI fallback, structured Gemini classification; addresses #92, #111 and item 5 of #113 |
+| DOC-README | DOC | README Repository Guide | `docs/readme-overview` | #124 | 2 | In Review | Reorganized the README around the run flow, setup, first API request, source layout, API endpoints, configuration, and test tiers. |
 
 ---
 
@@ -522,3 +523,9 @@ This document tracks execution progress across all backlog tasks, including pull
 - **PR**: https://github.com/getdownandcode/AgentKit/pull/123
 - **Commits**: 6 (three issue-specific fixes, initial progress bookkeeping, review fix, and this commit correcting the count)
 - **Notes**: **#92** — `audit_credentials()` now catches the `ValueError` raised by component-mode Postgres URL resolution for a malformed `POSTGRES_PORT`, reports one stable `POSTGRES_PORT is not a valid integer.` problem, and continues the audit without a traceback. **#111** — duplicate-tool failure reasons keep the tool name and loop category without echoing arguments; execution logs no longer include raw arguments; trace-sink errors are logged at `WARNING` with `run_id`/`step_no` while the run continues; OpenAI credentials come only from `Settings`, and rate-limit handling honors the `retry-after-ms` and `retry-after` response headers (numeric seconds or HTTP-date) before using the configured `RETRY_AFTER_FALLBACK_S` (default 60). A Codex review follow-up added regression coverage for header precedence, milliseconds conversion, malformed headers, fallback and HTTP-date parsing. **#113 item 5** — Gemini error classification inspects structured API status/reason fields and selects `code` only when non-null before falling back to `status_code`. Regression tests also cover malformed port input, sensitive failure reasons, trace logging, configured retry fallback, and structured Gemini errors. Verified: full `pytest` suite passes (real-infrastructure tier skipped because disabled), `ruff check .`, `ruff format --check .`, and `mypy agentkit` pass. The other six independent #113 findings remain outside this PR.
+
+### PR #124: README Repository Guide
+- **Status**: In Review
+- **PR**: https://github.com/getdownandcode/AgentKit/pull/124
+- **Commits**: 2 (README rewrite plus this progress update)
+- **Notes**: Replaced the long feature-and-roadmap-oriented README with a reader-oriented guide: what a run does, Compose setup and required secrets, a first authenticated request, offline demo, source-directory map, built-in tools, actual API endpoints, settings, tests, and links to deeper docs. Removed stale examples that did not match current APIs and provider interfaces. Reviewed commands and endpoint descriptions against the current application and Compose configuration; `git diff --check` passed.
