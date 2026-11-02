@@ -238,6 +238,11 @@ class Settings(BaseSettings):
         gt=0,
         description="Maximum delay in seconds between LLM retry attempts.",
     )
+    RETRY_AFTER_FALLBACK_S: int = Field(
+        default=60,
+        gt=0,
+        description="Retry-After fallback in seconds when a provider omits it.",
+    )
     FILE_TOOL_BASE_DIR: str = Field(
         default="/tmp/agentkit_sandbox",
         description="Base directory for sandboxed file reading operations.",

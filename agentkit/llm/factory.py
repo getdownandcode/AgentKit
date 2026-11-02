@@ -74,6 +74,11 @@ def create_llm_client_from_settings(settings: Settings) -> LLMClient:
         provider=provider,
         api_key=api_key,
         model=settings.LLM_MODEL,
+        **(
+            {"retry_after_fallback_s": settings.RETRY_AFTER_FALLBACK_S}
+            if provider == "openai"
+            else {}
+        ),
     )
 
     if provider in ("gemini", "openai") and settings.LLM_MAX_RETRIES > 0:

@@ -3,7 +3,6 @@
 import inspect
 import json
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -25,25 +24,26 @@ class OpenAIClient(LLMClient):
         api_key: str | None = None,
         model: str = "gpt-4o",
         client: Any | None = None,
+        retry_after_fallback_s: int = 60,
     ) -> None:
         """Initialize the OpenAI client adapter.
 
         Args:
-            api_key: OpenAI API key. If omitted, uses OPENAI_API_KEY environment variable.
+            api_key: OpenAI API key supplied by application settings.
             model: OpenAI model identifier (default: gpt-4o).
             client: Optional pre-configured AsyncOpenAI client instance (useful for mocking).
+            retry_after_fallback_s: Fallback delay when a rate limit response has no header.
         """
         self.model = model
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key
+        self.retry_after_fallback_s = retry_after_fallback_s
 
         if client is not None:
             self._client = client
         elif self.api_key:
             self._client = openai.AsyncOpenAI(api_key=self.api_key)
         else:
-            raise AuthenticationError(
-                "OpenAI API key not configured. Set OPENAI_API_KEY environment variable or pass api_key."
-            )
+            raise AuthenticationError("OpenAI API key is not configured in application settings.")
 
     async def aclose(self) -> None:
         """Close the underlying AsyncOpenAI client and its connection pool."""
@@ -126,7 +126,8 @@ class OpenAIClient(LLMClient):
         except openai.AuthenticationError as exc:
             raise AuthenticationError(f"OpenAI authentication failed: {exc}") from exc
         except openai.RateLimitError as exc:
-            raise RateLimitExceededError(retry_after=60) from exc
+            retry_after = getattr(exc, "retry_after", None) or self.retry_after_fallback_s
+            raise RateLimitExceededError(retry_after=int(retry_after)) from exc
         except openai.OpenAIError as exc:
             status_code = getattr(exc, "status_code", None)
             raise LLMProviderError(

@@ -17,7 +17,7 @@ def mock_openai_client() -> MagicMock:
 
 
 def test_openai_client_init_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-read")
     with pytest.raises(AuthenticationError):
         OpenAIClient(api_key=None)
 
@@ -176,7 +176,7 @@ async def test_openai_client_message_conversion(mock_openai_client: MagicMock) -
 
 @pytest.mark.asyncio
 async def test_openai_client_error_handling(mock_openai_client: MagicMock) -> None:
-    adapter = OpenAIClient(client=mock_openai_client)
+    adapter = OpenAIClient(client=mock_openai_client, retry_after_fallback_s=17)
 
     # Authentication error
     mock_openai_client.chat.completions.create.side_effect = openai.AuthenticationError(
@@ -193,8 +193,9 @@ async def test_openai_client_error_handling(mock_openai_client: MagicMock) -> No
         response=MagicMock(status_code=429),
         body=None,
     )
-    with pytest.raises(RateLimitExceededError):
+    with pytest.raises(RateLimitExceededError) as rate_limit:
         await adapter.chat(messages=[Message.user("hi")])
+    assert rate_limit.value.retry_after == 17
 
     # General provider error
     mock_openai_client.chat.completions.create.side_effect = openai.APIConnectionError(
