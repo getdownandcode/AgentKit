@@ -25,6 +25,7 @@ from agentkit.api.schemas import (
 from agentkit.core.agent import Agent
 from agentkit.core.errors import PersistenceError, RunNotFoundError
 from agentkit.core.trace import StepTrace, TraceSink
+from agentkit.core.types import RunStatus
 from agentkit.memory.base import MemoryStore
 from agentkit.memory.pg_store import PostgresMemoryStore
 from agentkit.tools.registry import ToolRegistry
@@ -75,7 +76,7 @@ async def create_run(
             run_id=run_record.id,
             session_id=run_record.session_id,
             goal=run_record.goal,
-            status=run_record.status,
+            status=RunStatus(run_record.status),
             answer=run_record.final_answer,
             failure_reason=run_record.failure_reason,
             total_input_tokens=run_record.total_input_tokens,
@@ -90,7 +91,7 @@ async def create_run(
         run_id=result.run_id,
         session_id=payload.session_id,
         goal=payload.goal,
-        status=result.status.value,
+        status=result.status,
         answer=result.final_answer,
         failure_reason=result.failure_reason,
         total_input_tokens=result.total_input_tokens,
@@ -117,7 +118,7 @@ async def get_run_details(
         run_id=run_record.id,
         session_id=run_record.session_id,
         goal=run_record.goal,
-        status=run_record.status,
+        status=RunStatus(run_record.status),
         answer=run_record.final_answer,
         failure_reason=run_record.failure_reason,
         total_input_tokens=run_record.total_input_tokens,

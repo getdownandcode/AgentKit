@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentkit.core.types import RunStatus
 from agentkit.db.models import SESSION_ID_MAX_LENGTH
 
 
@@ -32,7 +33,7 @@ class RunResponse(BaseModel):
     run_id: str = Field(..., description="Unique identifier of the run.")
     session_id: str | None = Field(default=None, description="Associated session identifier.")
     goal: str = Field(..., description="Task objective submitted for this run.")
-    status: str = Field(..., description="Execution status of the run.")
+    status: RunStatus = Field(..., description="Execution status of the run.")
     answer: str | None = Field(default=None, description="Final answer produced by the agent.")
     failure_reason: str | None = Field(
         default=None, description="Reason for failure if status is failed or timed_out."

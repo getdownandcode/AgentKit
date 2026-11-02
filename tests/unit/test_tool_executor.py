@@ -109,5 +109,17 @@ async def test_execute_output_truncation(test_registry: ToolRegistry) -> None:
     result = await execute_tool(test_registry, call, max_chars=100)
     assert result.ok is True
     assert result.truncated is True
-    assert len(result.output) <= 150  # 100 chars + truncation marker
+    assert len(result.output) <= 100
     assert "[Output truncated" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_output_truncation_handles_tiny_character_budget(
+    test_registry: ToolRegistry,
+) -> None:
+    """A truncation marker must never exceed a very small output budget."""
+    call = ToolCall(id="call_tiny", name="verbose_tool", arguments={"length": 20})
+    result = await execute_tool(test_registry, call, max_chars=4)
+    assert result.ok is True
+    assert result.truncated is True
+    assert len(result.output) <= 4
