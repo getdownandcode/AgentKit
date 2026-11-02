@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import openai
@@ -190,7 +192,7 @@ async def test_openai_client_error_handling(mock_openai_client: MagicMock) -> No
     # Rate limit error
     mock_openai_client.chat.completions.create.side_effect = openai.RateLimitError(
         message="Quota exceeded",
-        response=MagicMock(status_code=429),
+        response=MagicMock(status_code=429, headers={}),
         body=None,
     )
     with pytest.raises(RateLimitExceededError) as rate_limit:
@@ -203,3 +205,53 @@ async def test_openai_client_error_handling(mock_openai_client: MagicMock) -> No
     )
     with pytest.raises(LLMProviderError):
         await adapter.chat(messages=[Message.user("hi")])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("headers", "expected_retry_after"),
+    [
+        ({"retry-after": "12"}, 12),
+        ({"retry-after-ms": "2500"}, 3),
+        ({"retry-after-ms": "1500", "retry-after": "12"}, 2),
+        ({"retry-after-ms": "invalid", "retry-after": "9"}, 9),
+        ({"retry-after": "not-a-delay"}, 17),
+    ],
+)
+async def test_openai_rate_limit_honors_retry_headers(
+    mock_openai_client: MagicMock,
+    headers: dict[str, str],
+    expected_retry_after: int,
+) -> None:
+    """Provider retry headers take precedence over the configured fallback."""
+    adapter = OpenAIClient(client=mock_openai_client, retry_after_fallback_s=17)
+    mock_openai_client.chat.completions.create.side_effect = openai.RateLimitError(
+        message="Quota exceeded",
+        response=MagicMock(status_code=429, headers=headers),
+        body=None,
+    )
+
+    with pytest.raises(RateLimitExceededError) as raised:
+        await adapter.chat(messages=[Message.user("hi")])
+    assert raised.value.retry_after == expected_retry_after
+
+
+@pytest.mark.asyncio
+async def test_openai_rate_limit_parses_retry_after_http_date(
+    mock_openai_client: MagicMock,
+) -> None:
+    """The standard HTTP-date form of Retry-After is converted to seconds."""
+    retry_at = datetime.now(UTC) + timedelta(seconds=10)
+    adapter = OpenAIClient(client=mock_openai_client, retry_after_fallback_s=17)
+    mock_openai_client.chat.completions.create.side_effect = openai.RateLimitError(
+        message="Quota exceeded",
+        response=MagicMock(
+            status_code=429,
+            headers={"retry-after": format_datetime(retry_at, usegmt=True)},
+        ),
+        body=None,
+    )
+
+    with pytest.raises(RateLimitExceededError) as raised:
+        await adapter.chat(messages=[Message.user("hi")])
+    assert raised.value.retry_after in {9, 10}

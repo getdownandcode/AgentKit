@@ -3,7 +3,10 @@
 import inspect
 import json
 import logging
+import math
 import uuid
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import openai
@@ -14,6 +17,42 @@ from agentkit.llm.base import LLMClient, LLMResponse, Message, TokenUsage
 from agentkit.tools.models import ToolCall, ToolSchema
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_after_seconds(exc: openai.RateLimitError, fallback_s: int) -> int:
+    """Return the provider's retry delay, or the configured fallback if absent/invalid."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return fallback_s
+
+    retry_after_ms = headers.get("retry-after-ms")
+    if retry_after_ms is not None:
+        try:
+            delay_s = float(retry_after_ms) / 1000
+        except (TypeError, ValueError):
+            delay_s = math.nan
+        if math.isfinite(delay_s) and delay_s >= 0:
+            return math.ceil(delay_s)
+
+    retry_after = headers.get("retry-after")
+    if retry_after is None:
+        return fallback_s
+
+    try:
+        delay_s = float(retry_after)
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError, OverflowError):
+            return fallback_s
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        delay_s = (retry_at - datetime.now(UTC)).total_seconds()
+
+    if not math.isfinite(delay_s):
+        return fallback_s
+    return max(0, math.ceil(delay_s))
 
 
 class OpenAIClient(LLMClient):
@@ -126,8 +165,8 @@ class OpenAIClient(LLMClient):
         except openai.AuthenticationError as exc:
             raise AuthenticationError(f"OpenAI authentication failed: {exc}") from exc
         except openai.RateLimitError as exc:
-            retry_after = getattr(exc, "retry_after", None) or self.retry_after_fallback_s
-            raise RateLimitExceededError(retry_after=int(retry_after)) from exc
+            retry_after = _retry_after_seconds(exc, self.retry_after_fallback_s)
+            raise RateLimitExceededError(retry_after=retry_after) from exc
         except openai.OpenAIError as exc:
             status_code = getattr(exc, "status_code", None)
             raise LLMProviderError(
