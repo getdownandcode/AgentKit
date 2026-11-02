@@ -127,6 +127,7 @@ API_KEYS=dev_key_1,dev_key_2
 LLM_MAX_RETRIES=3
 LLM_RETRY_BASE_DELAY_S=0.5
 LLM_RETRY_MAX_DELAY_S=10
+RETRY_AFTER_FALLBACK_S=60
 ```
 
 ### 4. Running with Docker Compose (Recommended)

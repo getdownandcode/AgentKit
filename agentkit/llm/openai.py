@@ -3,8 +3,10 @@
 import inspect
 import json
 import logging
-import os
+import math
 import uuid
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import openai
@@ -17,6 +19,42 @@ from agentkit.tools.models import ToolCall, ToolSchema
 logger = logging.getLogger(__name__)
 
 
+def _retry_after_seconds(exc: openai.RateLimitError, fallback_s: int) -> int:
+    """Return the provider's retry delay, or the configured fallback if absent/invalid."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return fallback_s
+
+    retry_after_ms = headers.get("retry-after-ms")
+    if retry_after_ms is not None:
+        try:
+            delay_s = float(retry_after_ms) / 1000
+        except (TypeError, ValueError):
+            delay_s = math.nan
+        if math.isfinite(delay_s) and delay_s >= 0:
+            return math.ceil(delay_s)
+
+    retry_after = headers.get("retry-after")
+    if retry_after is None:
+        return fallback_s
+
+    try:
+        delay_s = float(retry_after)
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError, OverflowError):
+            return fallback_s
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        delay_s = (retry_at - datetime.now(UTC)).total_seconds()
+
+    if not math.isfinite(delay_s):
+        return fallback_s
+    return max(0, math.ceil(delay_s))
+
+
 class OpenAIClient(LLMClient):
     """LLM client adapter for OpenAI chat completion models via openai SDK."""
 
@@ -25,25 +63,26 @@ class OpenAIClient(LLMClient):
         api_key: str | None = None,
         model: str = "gpt-4o",
         client: Any | None = None,
+        retry_after_fallback_s: int = 60,
     ) -> None:
         """Initialize the OpenAI client adapter.
 
         Args:
-            api_key: OpenAI API key. If omitted, uses OPENAI_API_KEY environment variable.
+            api_key: OpenAI API key supplied by application settings.
             model: OpenAI model identifier (default: gpt-4o).
             client: Optional pre-configured AsyncOpenAI client instance (useful for mocking).
+            retry_after_fallback_s: Fallback delay when a rate limit response has no header.
         """
         self.model = model
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key
+        self.retry_after_fallback_s = retry_after_fallback_s
 
         if client is not None:
             self._client = client
         elif self.api_key:
             self._client = openai.AsyncOpenAI(api_key=self.api_key)
         else:
-            raise AuthenticationError(
-                "OpenAI API key not configured. Set OPENAI_API_KEY environment variable or pass api_key."
-            )
+            raise AuthenticationError("OpenAI API key is not configured in application settings.")
 
     async def aclose(self) -> None:
         """Close the underlying AsyncOpenAI client and its connection pool."""
@@ -126,7 +165,8 @@ class OpenAIClient(LLMClient):
         except openai.AuthenticationError as exc:
             raise AuthenticationError(f"OpenAI authentication failed: {exc}") from exc
         except openai.RateLimitError as exc:
-            raise RateLimitExceededError(retry_after=60) from exc
+            retry_after = _retry_after_seconds(exc, self.retry_after_fallback_s)
+            raise RateLimitExceededError(retry_after=retry_after) from exc
         except openai.OpenAIError as exc:
             status_code = getattr(exc, "status_code", None)
             raise LLMProviderError(

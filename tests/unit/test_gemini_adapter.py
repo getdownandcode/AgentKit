@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentkit.core.errors import AuthenticationError, LLMProviderError
 from agentkit.core.types import Role
 from agentkit.llm.base import Message
 from agentkit.llm.gemini import GeminiClient
@@ -50,6 +51,39 @@ async def test_gemini_text_chat_translation(mock_genai_client: MagicMock) -> Non
     assert response.usage.output_tokens == 8
     assert response.usage.total_tokens == 20
     assert mock_genai_client.aio.models.generate_content.called
+
+
+@pytest.mark.asyncio
+async def test_gemini_classifies_structured_invalid_key_reason(
+    mock_genai_client: MagicMock,
+) -> None:
+    """Authentication classification reads provider error metadata, not display text."""
+    error = RuntimeError("request rejected")
+    error.code = 400  # type: ignore[attr-defined]
+    error.status_code = None  # type: ignore[attr-defined]
+    error.status = "INVALID_ARGUMENT"  # type: ignore[attr-defined]
+    error.details = {"error": {"reason": "API_KEY_INVALID"}}  # type: ignore[attr-defined]
+    mock_genai_client.aio.models.generate_content.side_effect = error
+    adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
+
+    with pytest.raises(AuthenticationError):
+        await adapter.chat([Message.user("hello")])
+
+
+@pytest.mark.asyncio
+async def test_gemini_status_code_falls_back_when_code_is_none(
+    mock_genai_client: MagicMock,
+) -> None:
+    """A present-but-empty code does not hide the alternate status_code field."""
+    error = RuntimeError("provider unavailable")
+    error.code = None  # type: ignore[attr-defined]
+    error.status_code = 503  # type: ignore[attr-defined]
+    mock_genai_client.aio.models.generate_content.side_effect = error
+    adapter = GeminiClient(api_key="fake-key", client=mock_genai_client)
+
+    with pytest.raises(LLMProviderError) as raised:
+        await adapter.chat([Message.user("hello")])
+    assert raised.value.status_code == 503
 
 
 @pytest.mark.asyncio

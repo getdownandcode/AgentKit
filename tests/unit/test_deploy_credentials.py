@@ -174,6 +174,14 @@ def test_malformed_redis_url_is_reported_instead_of_raising(url: str) -> None:
     assert problems == ["REDIS_URL is not a valid connection URL."]
 
 
+def test_invalid_postgres_port_is_reported_without_traceback() -> None:
+    """Malformed component ports become one stable operator-facing problem."""
+    problems = audit_credentials(
+        _env(DATABASE_URL=None, DATABASE_READONLY_URL=None, POSTGRES_PORT="abc")
+    )
+    assert problems.count("POSTGRES_PORT is not a valid integer.") == 1
+
+
 def test_problem_messages_never_echo_the_secret() -> None:
     """The guard reports variable names, never the credential it rejected."""
     secret = "hunter2"

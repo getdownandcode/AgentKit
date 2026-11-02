@@ -60,6 +60,7 @@ async def test_duplicate_tool_call_halts_with_failure_status() -> None:
     assert result.status == RunStatus.FAILED
     assert "duplicate tool call loop" in (result.failure_reason or "").lower()
     assert "search_query" in (result.failure_reason or "")
+    assert "python" not in (result.failure_reason or "")
     assert result.final_answer is None
 
 

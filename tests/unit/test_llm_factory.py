@@ -71,12 +71,14 @@ def test_create_from_settings_openai() -> None:
         LLM_MODEL="gpt-4o",
         OPENAI_API_KEY="test-openai-key",
         LLM_MAX_RETRIES=2,
+        RETRY_AFTER_FALLBACK_S=23,
     )
     client = create_llm_client_from_settings(settings)
     assert isinstance(client, RetryingLLMClient)
     assert isinstance(client._client, OpenAIClient)
     assert client.model == "gpt-4o"
     assert client._max_retries == 2
+    assert client._client.retry_after_fallback_s == 23
 
 
 def test_create_from_settings_zero_retries() -> None:

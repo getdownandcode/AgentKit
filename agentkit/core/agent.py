@@ -405,7 +405,7 @@ class Agent:
                                             f"Detected duplicate tool call loop: '{call.name}' called "
                                             f"{repeat_count} times with identical arguments within "
                                             f"the last {self.config.duplicate_tool_call_window} "
-                                            f"tool calls: {call.arguments}"
+                                            "tool calls with identical arguments."
                                         ),
                                         steps_count=steps_count,
                                         total_input_tokens=total_input_tokens,
@@ -417,9 +417,7 @@ class Agent:
                                         raise DuplicateToolCallLoopError(call.name, repeat_count)
                                     return res
 
-                                logger.info(
-                                    "Executing tool '%s' with args: %s", call.name, call.arguments
-                                )
+                                logger.info("Executing tool '%s'", call.name)
                                 result = await self.registry.execute(
                                     call,
                                     timeout_s=self.config.tool_timeout_s,
@@ -442,7 +440,7 @@ class Agent:
                                 )
 
                                 if self.trace is not None and hasattr(self.trace, "record"):
-                                    with contextlib.suppress(Exception):
+                                    try:
                                         trace_record = StepTrace(
                                             run_id=run_id,
                                             step_no=steps_count,
@@ -464,6 +462,13 @@ class Agent:
                                         )
                                         await self.trace.record(trace_record)
                                         traced_turn_usage.add(steps_count)
+                                    except Exception as exc:
+                                        logger.warning(
+                                            "Could not record tool trace (run_id=%s, step_no=%s): %s",
+                                            run_id,
+                                            steps_count,
+                                            exc,
+                                        )
                         else:
                             # No tool calls: this is the final answer, a provider refusal, or
                             # an empty completion. Only a non-empty answer is a success; the

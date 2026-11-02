@@ -36,6 +36,21 @@ def _enum_label(value: Any) -> str | None:
     return candidate if _ENUM_LABEL_REGEX.match(candidate) else None
 
 
+def _has_invalid_api_key_reason(details: Any) -> bool:
+    """Inspect structured Google error details for the API-key rejection reason."""
+    if isinstance(details, dict):
+        if details.get("reason") == "API_KEY_INVALID":
+            return True
+        return any(
+            _has_invalid_api_key_reason(value)
+            for key, value in details.items()
+            if key in {"error", "details", "errors"}
+        )
+    if isinstance(details, list):
+        return any(_has_invalid_api_key_reason(item) for item in details)
+    return False
+
+
 class GeminiClient(LLMClient):
     """LLM client adapter for Google Gemini models via google-genai."""
 
@@ -186,9 +201,17 @@ class GeminiClient(LLMClient):
             )
         except Exception as exc:
             err_str = str(exc)
-            if "API_KEY_INVALID" in err_str or "unauthenticated" in err_str.lower():
+            status_code = getattr(exc, "code", None)
+            if status_code is None:
+                status_code = getattr(exc, "status_code", None)
+            provider_status = getattr(exc, "status", None)
+            details = getattr(exc, "details", None)
+            if (
+                provider_status in {"UNAUTHENTICATED", "PERMISSION_DENIED"}
+                or _has_invalid_api_key_reason(details)
+                or status_code == 401
+            ):
                 raise AuthenticationError(f"Gemini API key is invalid: {err_str}") from exc
-            status_code = getattr(exc, "code", getattr(exc, "status_code", None))
             raise LLMProviderError(
                 provider="gemini",
                 message=err_str,

@@ -118,7 +118,7 @@ async def test_agent_integration_with_trace_sink() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_continues_when_trace_sink_fails() -> None:
+async def test_agent_continues_when_trace_sink_fails(caplog: pytest.LogCaptureFixture) -> None:
     registry = ToolRegistry()
 
     @tool(registry=registry)
@@ -149,3 +149,6 @@ async def test_agent_continues_when_trace_sink_fails() -> None:
     result = await agent.run(goal="Do simple action")
     assert result.status == RunStatus.SUCCEEDED
     assert result.final_answer == "Completed action"
+    assert "Could not record tool trace" in caplog.text
+    assert "run_id=" in caplog.text
+    assert "step_no=1" in caplog.text

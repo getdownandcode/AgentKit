@@ -133,6 +133,7 @@ services:
       - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
       - LLM_RETRY_BASE_DELAY_S=${LLM_RETRY_BASE_DELAY_S:-0.5}
       - LLM_RETRY_MAX_DELAY_S=${LLM_RETRY_MAX_DELAY_S:-10}
+      - RETRY_AFTER_FALLBACK_S=${RETRY_AFTER_FALLBACK_S:-60}
       # No default key. An unset or empty API_KEYS leaves the api service to fail at
       # startup on Settings validation rather than running with a published key.
       # Compose keeps ${VAR:-} so `down`, `ps` and `logs` still work without it.
