@@ -164,26 +164,36 @@ def audit_credentials(env: Mapping[str, str]) -> list[str]:
     # Resolved exactly the way Settings resolves them: an explicit URL wins, otherwise the
     # URL is assembled from the POSTGRES_* components with the credentials escaped. Auditing
     # the raw variables would either miss the component form or misread an escaped password.
-    app_url = (
-        resolve_postgres_url(
-            env,
-            url_var="DATABASE_URL",
-            user_var="POSTGRES_USER",
-            password_var="POSTGRES_PASSWORD",
-            default_user=DEFAULT_POSTGRES_USER,
+    try:
+        app_url = (
+            resolve_postgres_url(
+                env,
+                url_var="DATABASE_URL",
+                user_var="POSTGRES_USER",
+                password_var="POSTGRES_PASSWORD",
+                default_user=DEFAULT_POSTGRES_USER,
+            )
+            or ""
         )
-        or ""
-    )
-    readonly_url = (
-        resolve_postgres_url(
-            env,
-            url_var="DATABASE_READONLY_URL",
-            user_var="POSTGRES_READONLY_USER",
-            password_var="POSTGRES_READONLY_PASSWORD",
-            default_user=DEFAULT_READONLY_USER,
+    except ValueError:
+        app_url = ""
+        problems.append("POSTGRES_PORT is not a valid integer.")
+
+    try:
+        readonly_url = (
+            resolve_postgres_url(
+                env,
+                url_var="DATABASE_READONLY_URL",
+                user_var="POSTGRES_READONLY_USER",
+                password_var="POSTGRES_READONLY_PASSWORD",
+                default_user=DEFAULT_READONLY_USER,
+            )
+            or ""
         )
-        or ""
-    )
+    except ValueError:
+        readonly_url = ""
+        if "POSTGRES_PORT is not a valid integer." not in problems:
+            problems.append("POSTGRES_PORT is not a valid integer.")
     raw_redis = (env.get("REDIS_URL") or "").strip()
     redis_url, redis_problems = _resolve_redis_url(raw_redis, env.get("REDIS_PASSWORD"))
     problems.extend(redis_problems)
