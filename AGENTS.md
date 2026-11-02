@@ -104,6 +104,7 @@ agentkit/
 - **Atomic Commits**: One logical change per commit.
 - **Branching Strategy**:
   - Feature/task branches only: `feat/<slug>`, `fix/<slug>`, `test/<slug>`, `docs/<slug>`, `chore/<slug>`.
+  - Branch lanes: `develop` is the integration lane, `fix/work-queue` is the starting lane for maintenance fixes, and `feat/roadmap` is the starting lane for feature work. Create a short-lived task branch from the appropriate lane and open its PR against `main`.
   - **Never commit directly to `main`** (except the initial warm-up scaffolding push).
   - **Never force-push `main`**.
   - All task changes must be opened as pull requests and merged via `gh pr merge`.
