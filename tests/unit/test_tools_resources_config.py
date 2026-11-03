@@ -216,7 +216,7 @@ async def test_tool_output_max_chars_truncates_real_tool_output() -> None:
 
     tool_messages = [m for m in llm.history[-1] if m.role.value == "tool"]
     assert tool_messages, "the tool result never reached the model"
-    assert tool_messages[0].content.startswith("x" * 50)
+    assert len(tool_messages[0].content) <= 50
     assert "Output truncated" in tool_messages[0].content
 
 

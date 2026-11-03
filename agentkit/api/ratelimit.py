@@ -95,8 +95,16 @@ class RateLimiter:
         Redis is unreachable.
         """
         now = time.time()
-        effective_limit = limit or self.requests_per_window or 30
-        effective_window = float(window_seconds or self.window_seconds)
+        effective_limit = (
+            limit
+            if limit is not None
+            else self.requests_per_window
+            if self.requests_per_window is not None
+            else 30
+        )
+        effective_window = float(
+            window_seconds if window_seconds is not None else self.window_seconds
+        )
 
         if redis_client is not None:
             redis_key = f"{self.prefix}{key}"
@@ -143,8 +151,11 @@ class RateLimiter:
         active_timestamps = [t for t in self._memory_store.get(key, []) if t > now - window]
 
         if len(active_timestamps) >= limit:
-            oldest_score = active_timestamps[0]
-            retry_after = max(1, math.ceil(oldest_score + window - now))
+            retry_after = (
+                max(1, math.ceil(active_timestamps[0] + window - now))
+                if active_timestamps
+                else max(1, math.ceil(window))
+            )
             self._memory_store[key] = active_timestamps
             logger.warning(
                 "In-memory rate limit exceeded for key %s. Retry after: %ds",

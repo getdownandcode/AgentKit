@@ -104,9 +104,19 @@ agentkit/
 - **Atomic Commits**: One logical change per commit.
 - **Branching Strategy**:
   - Feature/task branches only: `feat/<slug>`, `fix/<slug>`, `test/<slug>`, `docs/<slug>`, `chore/<slug>`.
+  - Branch lanes: `develop` is the integration lane, `fix/work-queue` is the starting lane for maintenance fixes, and `feat/roadmap` is the starting lane for feature work. Create a short-lived task branch from the appropriate lane and open its PR against `main`.
   - **Never commit directly to `main`** (except the initial warm-up scaffolding push).
   - **Never force-push `main`**.
   - All task changes must be opened as pull requests and merged via `gh pr merge`.
+
+### Release and tag workflow
+- Use Semantic Versioning. Keep `[project].version` in `pyproject.toml` aligned with the latest published release until a release PR proposes the next version.
+- Before choosing a version, fetch tags and inspect the current release: `git fetch --tags`, `git tag --sort=-version:refname`, and `gh release view`.
+- Bump the version and update release notes in a task branch; run the full quality gates and open a PR. Do not create a release tag before that PR is merged to `main`.
+- After merge, verify `main` is current and the version is unused, then create an annotated tag on the merge commit: `git tag -a vX.Y.Z -m "AgentKit vX.Y.Z"`. Push the tag with `git push origin vX.Y.Z` and create the GitHub release with `gh release create vX.Y.Z --verify-tag --generate-notes`.
+- For package artifacts, build and inspect before publishing: `python -m pip install build twine`, `python -m build`, and `python -m twine check dist/*`. Confirm the package registry name belongs to this repository and that the publishing identity is configured before any upload; never publish credentials or artifacts from an unreviewed branch.
+- Registry check on 2026-11-03 found that PyPI's `agentkit` project metadata identifies a different maintainer and project. Do not upload this repository under that name unless ownership is confirmed; resolve the distribution name and update `pyproject.toml`, install instructions, and the trusted publisher configuration first.
+- Never move or reuse a published tag. If a tag already exists, select the next unused version and record the correction in the release PR.
 
 ---
 

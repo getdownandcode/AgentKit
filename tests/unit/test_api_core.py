@@ -3,12 +3,28 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from agentkit.api.main import create_app
+from agentkit.api.schemas import RunResponse
 from agentkit.core.errors import ToolNotFoundError, ToolSecurityError
+from agentkit.core.types import RunStatus
 
 
 def test_app_creation() -> None:
     app = create_app()
     assert app.title == "AgentKit API"
+
+
+def test_run_response_status_is_a_run_status_enum() -> None:
+    """The API boundary should validate statuses and publish their enum values."""
+    response = RunResponse.model_validate(
+        {
+            "run_id": "run-1",
+            "session_id": None,
+            "goal": "test",
+            "status": "succeeded",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    assert response.status is RunStatus.SUCCEEDED
 
 
 def test_domain_exception_handler() -> None:

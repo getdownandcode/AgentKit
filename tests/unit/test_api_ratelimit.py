@@ -95,6 +95,18 @@ async def test_rate_limiter_in_memory_fallback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rate_limiter_preserves_zero_limit() -> None:
+    """An explicit zero quota denies requests instead of falling back to a default."""
+    limiter = RateLimiter(requests_per_window=0, window_seconds=10)
+    with pytest.raises(RateLimitExceededError):
+        await limiter.check(key="zero_limit", redis_client=None)
+    with pytest.raises(RateLimitExceededError):
+        await RateLimiter(requests_per_window=5).check(
+            key="zero_override", redis_client=None, limit=0
+        )
+
+
+@pytest.mark.asyncio
 async def test_rate_limit_api_endpoint_429_with_headers(fake_redis: Redis[Any]) -> None:
     test_settings = Settings(
         API_KEYS="test_api_key",

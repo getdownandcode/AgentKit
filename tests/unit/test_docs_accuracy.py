@@ -38,6 +38,11 @@ def test_readme_does_not_claim_ast_validation_for_sql() -> None:
     assert "DATABASE_READONLY_URL" in sql_line
 
 
+def test_readme_shows_the_default_gemini_model() -> None:
+    """The quick orientation page should state which Gemini model runs by default."""
+    assert "gemini-3.1-flash-lite" in _read("README.md")
+
+
 def test_adr_006_is_marked_superseded_and_corrected() -> None:
     """ADR-006 asserted a base64 behaviour Pydantic never had and a stale model id."""
     decisions = _read("docs/DECISIONS.md")

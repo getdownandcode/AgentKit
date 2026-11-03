@@ -1,12 +1,14 @@
 # AgentKit
 
+<img src="docs/assets/agentkit-logo.png" alt="AgentKit logo" width="96">
+
 [![CI](https://github.com/getdownandcode/AgentKit/actions/workflows/ci.yml/badge.svg)](https://github.com/getdownandcode/AgentKit/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 AgentKit is a Python service for running tool-using AI agents. A client submits a goal, the agent asks a language model what to do, runs any requested tools, and returns a final answer. Runs and tool steps are recorded so they can be inspected later.
 
-The runtime is implemented in this repository rather than delegated to an agent framework. It supports Google Gemini and OpenAI; tests use a fake model client so the normal test suite does not need provider credentials.
+The runtime is implemented in this repository rather than delegated to an agent framework. It supports Google Gemini and OpenAI; the default Gemini model is `gemini-3.1-flash-lite`. Tests use a fake model client so the normal test suite does not need provider credentials.
 
 ## What happens during a run
 
@@ -128,7 +130,7 @@ The standard API registry includes these tools:
 - `calculator` evaluates arithmetic through a restricted AST evaluator.
 - `read_file` reads files under the configured sandbox directory and blocks traversal and symlink escapes.
 - `http_fetch` fetches HTTP(S) resources while blocking private, loopback, link-local, and metadata addresses.
-- `sql_readonly` runs a single read-only query using a dedicated PostgreSQL role. It fails closed when that role is not configured.
+- `sql_readonly` runs a single read-only query using the dedicated PostgreSQL role configured by `DATABASE_READONLY_URL`. It fails closed when that role is not configured.
 - `web_search` is included only when `SEARCH_API_KEY` is set.
 
 Tool arguments are validated against JSON Schema derived from Python function annotations. Synchronous tools run outside the event loop; tool results and errors are returned in a structured form.
@@ -180,6 +182,7 @@ registry = ToolRegistry()
 def add_numbers(left: int, right: int) -> int:
     """Add two integers."""
     return left + right
+
 
 schema = registry.schemas()[0]
 schema.name, schema.parameters

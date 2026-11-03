@@ -12,6 +12,14 @@ if TYPE_CHECKING:
     from agentkit.tools.registry import ToolRegistry
 
 
+def _truncate_output(output: str, max_chars: int) -> str:
+    """Keep a truncation notice inside the configured output character budget."""
+    marker = f"\n[Output truncated: exceeded {max_chars} character limit]"
+    if max_chars <= len(marker):
+        return marker[:max_chars]
+    return output[: max_chars - len(marker)] + marker
+
+
 async def execute_tool(
     registry: "ToolRegistry",
     tool_call: ToolCall,
@@ -75,10 +83,7 @@ async def execute_tool(
             if raw_output.latency_ms == 0:
                 updates["latency_ms"] = latency_ms
             if raw_output.ok and len(raw_output.output) > max_chars:
-                updates["output"] = (
-                    raw_output.output[:max_chars]
-                    + f"\n[Output truncated: exceeded {max_chars} character limit]"
-                )
+                updates["output"] = _truncate_output(raw_output.output, max_chars)
                 updates["truncated"] = True
             return raw_output.model_copy(update=updates) if updates else raw_output
 
@@ -87,10 +92,7 @@ async def execute_tool(
 
         # Truncate if output exceeds max_chars limit
         if len(output_str) > max_chars:
-            truncated_str = (
-                output_str[:max_chars]
-                + f"\n[Output truncated: exceeded {max_chars} character limit]"
-            )
+            truncated_str = _truncate_output(output_str, max_chars)
             return ToolResult.success(
                 truncated_str,
                 latency_ms=latency_ms,
